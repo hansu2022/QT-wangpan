@@ -1,4 +1,5 @@
 *:Zone.Identifier
-build-*
 *.exe
-
+*.pro.user
+*.pro.user.*
+*/build/
