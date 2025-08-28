@@ -211,3 +211,51 @@ void OpeDB::handleAddFriendAgree(const char *name, const char *pername)
         qDebug() << "好友添加成功:" << name << "<->" << pername;
     }
 }
+
+QStringList OpeDB::handleFlushFriend(const char *name)
+{
+    // 如果传入的名字为空，返回一个空的列表并记录日志
+    if (name == NULL) {
+        qDebug() << "错误：handleFlushFriend 的输入名字为空。";
+        return QStringList();
+    }
+
+    QStringList strFriendList; // 用于存储好友信息的列表
+    QSqlQuery query;
+
+    // 使用 JOIN 优化查询，并使用参数占位符 '?' 防止 SQL 注入
+    QString strSql = "SELECT u.name, u.online "
+                     "FROM usrInfo u "
+                     "JOIN friend f ON (u.id = f.friendId AND f.id = (SELECT id FROM usrInfo WHERE name = ?)) "
+                     "OR (u.id = f.id AND f.friendId = (SELECT id FROM usrInfo WHERE name = ?))";
+
+    query.prepare(strSql);
+    // 绑定参数
+    query.addBindValue(QString(name));
+    query.addBindValue(QString(name));
+
+    // 执行查询，如果失败则输出错误信息并返回空列表
+    if (!query.exec()) {
+        qDebug() << "查询好友失败：";
+        return strFriendList;
+    }
+
+    // 遍历查询结果，将好友信息添加到列表中
+    while (query.next()) {
+        QString friendName = query.value("name").toString();
+        int onlineStatus = query.value("online").toInt();
+
+        // 根据在线状态（0或1）转换为文字描述
+        QString statusText = (onlineStatus == 1) ? "在线" : "不在线";
+
+        // 将好友的名字和状态文字组合成一个字符串并添加到列表中
+        QString friendInfo = QString("%1(%2)").arg(friendName).arg(statusText);
+        strFriendList.append(friendInfo);
+    }
+
+    // 添加日志：记录查询到的好友数量和具体内容
+    qDebug() << QString("查询用户 '%1' 的好友列表成功，共找到 %2 个好友。").arg(name).arg(strFriendList.size());
+    qDebug() << "好友列表内容：" << strFriendList;
+
+    return strFriendList;
+}

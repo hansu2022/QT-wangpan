@@ -1,75 +1,99 @@
-#include "tcpclient.h"
-#include "ui_tcpclient.h"
-#include <QByteArray>
-#include <QDebug>
-#include <QMessageBox>
-#include <QHostAddress>
+#include "tcpclient.h" // 包含自定义的头文件，通常包含 TcpClient 类的声明
+#include "ui_tcpclient.h" // 包含由 Qt Designer 生成的 UI 头文件
+#include <QByteArray>     // 提供 QByteArray 类，用于处理字节数组数据
+#include <QDebug>         // 提供 qDebug() 函数，用于调试输出
+#include <QMessageBox>    // 提供 QMessageBox 类，用于显示消息框
+#include <QHostAddress>   // 提供 QHostAddress 类，用于处理 IP 地址
+
+// TcpClient 类的构造函数
 TcpClient::TcpClient(QWidget *parent)
     : QWidget(parent)
-    , ui(new Ui::TcpClient)
+    , ui(new Ui::TcpClient) // 初始化 UI 对象
 {
-    ui->setupUi(this);
-    resize(500,200);
-    loadConfig();
+    ui->setupUi(this);  // 设置 UI 界面
+    resize(500,200);    // 调整窗口大小
+    loadConfig();       // 加载配置文件（服务器IP和端口）
+
+    // 连接信号和槽：当 m_tcpSocket 连接成功时，触发 showConnect() 槽函数
     connect(&m_tcpSocket,&QTcpSocket::connected,this,&TcpClient::showConnect);
+    // 连接信号和槽：当 m_tcpSocket 接收到新数据时，触发 recvMsg() 槽函数
     connect(&m_tcpSocket,&QTcpSocket::readyRead,this,&TcpClient::recvMsg);
+
+    // 尝试连接到服务器，使用配置文件中加载的IP和端口
     m_tcpSocket.connectToHost(QHostAddress(m_strIP),m_usPort);
 }
 
+// 析构函数，用于释放 UI 对象
 TcpClient::~TcpClient()
 {
     delete ui;
 }
 
+// 加载配置文件的方法
 void TcpClient::loadConfig()
 {
+    // QFile file(":/client.config"); // 从资源文件中读取配置文件
     QFile file(":/client.config");
+
+    // 尝试以只读模式打开文件
     if(file.open(QIODevice::ReadOnly)){
-        QByteArray baData = file.readAll();
-        QString strData = baData.toStdString().c_str();
-        file.close();
-        strData.replace("\n"," ");
-        QStringList strList = strData.split(" ");
-        m_strIP = strList.at(0);
-        m_usPort = strList.at(1).toUShort();
-        qDebug() << "ip:" << m_strIP<<"port: " << m_usPort;
+        QByteArray baData = file.readAll(); // 读取所有数据到 QByteArray
+        QString strData = baData.toStdString().c_str(); // 转换为 QString
+        file.close(); // 关闭文件
+
+        strData.replace("\n"," "); // 将换行符替换为空格
+        QStringList strList = strData.split(" "); // 按空格分割字符串
+        m_strIP = strList.at(0); // 第一个元素是 IP 地址
+        m_usPort = strList.at(1).toUShort(); // 第二个元素是端口号
+        qDebug() << "ip:" << m_strIP<<"port: " << m_usPort; // 调试输出IP和端口
     }else{
+        // 如果文件打开失败，弹出错误消息框
         QMessageBox::critical(this,"open config","open filed");
     }
 
 }
 
+// 单例模式：获取 TcpClient 类的唯一实例
 TcpClient &TcpClient::getInstance()
 {
     static TcpClient instance;
     return instance;
 }
 
+// 获取 TCP socket 对象的引用
 QTcpSocket &TcpClient::getTcpSocket()
 {
     return m_tcpSocket;
 }
 
+// 获取已登录的用户名
 QString TcpClient::getLoginName()
 {
     return m_strLoginName;
 }
 
+// 槽函数：连接成功时显示消息框
 void TcpClient::showConnect()
 {
     QMessageBox::information(this, "连接服务器", "连接服务器成功");
 }
 
+// 槽函数：处理接收到的数据
 void TcpClient::recvMsg()
 {
-    qDebug() << m_tcpSocket.bytesAvailable();
+    qDebug() << m_tcpSocket.bytesAvailable(); // 调试输出可读字节数
     uint uiPDULen = 0;
+    // 先读取数据包的总长度
     m_tcpSocket.read((char*)&uiPDULen,sizeof(uint));
     uint uiMsgLen = uiPDULen-sizeof(PDU);
+    // 根据总长度创建 PDU 数据包
     PDU *pdu = mkPDU(uiMsgLen);
+    // 读取剩余的数据到 PDU 结构体中
     m_tcpSocket.read((char*)pdu + sizeof(uint),uiPDULen-sizeof(uint));
-    // qDebug() << pdu->uiMsgType << pdu->caMsg;
+
+    // 根据消息类型处理不同的逻辑
     switch(pdu->uiMsgType){
+    // 注册响应
     case ENUM_MSG_TYPE_REGIST_RESPOND:{
         if(strcmp(pdu->caData,REGIST_OK) == 0){
             QMessageBox::information(this,"注册",REGIST_OK);
@@ -78,20 +102,23 @@ void TcpClient::recvMsg()
         }
         break;
     }
+    // 登录响应
     case ENUM_MSG_TYPE_LOGIN_RESPOND:{
         if(strcmp(pdu->caData,LOGIN_OK) == 0){
             QMessageBox::information(this,"登录",LOGIN_OK);
-            OpeWidget::getInstance().show();
-            hide();
+            OpeWidget::getInstance().show(); // 登录成功后显示主操作窗口
+            hide(); // 隐藏当前登录窗口
         }else if(strcmp(pdu->caData,LOGIN_FAILED) == 0){
             QMessageBox::warning(this,"登录",LOGIN_FAILED);
         }
         break;
     }
+    // 在线用户列表响应
     case ENUM_MSG_TYPE_ALL_ONLINE_RESPOND:{
-        OpeWidget::getInstance().getFriend()->showAllOnlineUsr(pdu);
+        OpeWidget::getInstance().getFriend()->showAllOnlineUsr(pdu); // 调用 Friend 类方法显示在线用户
         break;
     }
+    // 搜索用户响应
     case ENUM_MSG_TYPE_SEARCH_USR_RESPOND:{
         if(strcmp(SEARCH_USR_NO,pdu->caData) == 0){
             QMessageBox::warning(this,"搜索用户","没有此用户");
@@ -99,78 +126,69 @@ void TcpClient::recvMsg()
             QMessageBox::information(this,"搜索用户","用户在线");
         }else if(strcmp(SEARCH_USR_OFFLINE,pdu->caData) == 0){
             QMessageBox::information(this,"搜索用户","用户不在线");
+        }
         break;
-        }}
-    /*A 发起请求 -> 服务器
-    服务器 检查 -> B (如果B在线)
-    B 同意/拒绝 -> 服务器
-    服务器 处理(更新数据库) -> A (通知A最终结果)*/
+    }
+    // 添加好友请求（从服务器接收）
     case ENUM_MSG_TYPE_ADD_FRIEND_REQUEST:{
-        char caPerName[32] = {'\0'}; // B 的名字 (被请求者)
-        char caName[32] = {'\0'};    // A 的名字 (请求者)
-        strncpy(caPerName, pdu->caData, 32);
-        strncpy(caName, pdu->caData + 32, 32);
+        char caPerName[32] = {'\0'}; // 被请求者（我）
+        char caName[32] = {'\0'};    // 请求者（对方）
+        strncpy(caPerName, pdu->caData, 32);     // 复制被请求者名字
+        strncpy(caName, pdu->caData + 32, 32);   // 复制请求者名字
 
+        // 弹出消息框询问是否同意添加好友
         int ret = QMessageBox::information(this, "添加好友", QString("%1 请求添加你为好友").arg(caName), QMessageBox::Yes, QMessageBox::No);
 
-        // 响应 PDU 需要 64 字节来存放两个名字
+        // 创建响应数据包
         PDU *respdu = mkPDU(64);
-
-        // 把 A 的名字（请求者）放在前面
+        // 填充响应数据包中的名字信息
         memcpy(respdu->caData, caName, 32);
-        // 把 B 的名字（被请求者，也就是自己）放在后面
         memcpy(respdu->caData + 32, caPerName, 32);
 
+        // 根据用户选择设置响应消息类型
         if (QMessageBox::Yes == ret) {
             respdu->uiMsgType = ENUM_MSG_TYPE_ADD_FRIEND_AGREE;
         } else {
             respdu->uiMsgType = ENUM_MSG_TYPE_ADD_FRIEND_REFUSE;
         }
+        // 发送响应数据包给服务器
         m_tcpSocket.write((char*)respdu, respdu->uiPDULen);
-        free(respdu);
+        free(respdu); // 释放内存
         respdu = NULL;
         break;
     }
+    // 添加好友响应（从服务器接收）
     case ENUM_MSG_TYPE_ADD_FRIEND_RESPOND:{
+        // 显示服务器返回的添加好友结果
         QMessageBox::information(this,"添加好友",pdu->caData);
+        break;
+    }
+    // 刷新好友列表响应
+    case ENUM_MSG_TYPE_FLUSH_FRIEND_RESPOND:{
+        OpeWidget::getInstance().getFriend()->showAllFriend(pdu); // 调用 Friend 类方法显示好友列表
         break;
     }
     default:
         break;
     }
-    free(pdu);
+    free(pdu); // 释放 PDU 内存
     pdu = NULL;
 }
 
-// void TcpClient::on_pushButton_clicked()
-// {
-//     QString strMsg = ui->lineEdit->text();
-//     if(!strMsg.isEmpty()){
-//         PDU *pdu = mkPDU(strMsg.size()+1);
-//         pdu->uiMsgType = 8888;
 
-//         memcpy(pdu->caMsg,strMsg.toStdString().c_str(),strMsg.size()+1);
-//         m_tcpSocket.write((char*)pdu,pdu->uiPDULen);
-//         free(pdu);
-//         pdu = NULL;
-//     }else{
-//         QMessageBox::warning(this,"信息发送","发送的信息不能为空");
-//     }
-// }
-
-
+// 登录按钮的槽函数
 void TcpClient::on_login_pb_clicked()
 {
     QString strName = ui->name_le->text();
-
     QString strPwd = ui->pwd_le->text();
     if(!strName.isEmpty()&&!strPwd.isEmpty()){
-        m_strLoginName = strName;
+        m_strLoginName = strName; // 保存登录名
         PDU *pdu = mkPDU(0);
         pdu->uiMsgType = ENUM_MSG_TYPE_LOGIN_REQUEST;
+        // 将用户名和密码复制到 PDU 数据区
         strncpy(pdu->caData,strName.toStdString().c_str(),32);
         strncpy(pdu->caData+32,strPwd.toStdString().c_str(),32);
-        m_tcpSocket.write((char*)pdu,pdu->uiPDULen);
+        m_tcpSocket.write((char*)pdu,pdu->uiPDULen); // 发送数据包
         free(pdu);
         pdu = NULL;
     }else{
@@ -178,13 +196,12 @@ void TcpClient::on_login_pb_clicked()
     }
 }
 
-
+// 取消按钮的槽函数，此处为空实现
 void TcpClient::on_cancel_pb_clicked()
 {
-
 }
 
-
+// 注册按钮的槽函数
 void TcpClient::on_regist_pb_clicked()
 {
     QString strName = ui->name_le->text();
@@ -192,13 +209,13 @@ void TcpClient::on_regist_pb_clicked()
     if(!strName.isEmpty()&&!strPwd.isEmpty()){
         PDU *pdu = mkPDU(0);
         pdu->uiMsgType = ENUM_MSG_TYPE_REGIST_REQUEST;
+        // 将用户名和密码复制到 PDU 数据区
         strncpy(pdu->caData,strName.toStdString().c_str(),32);
         strncpy(pdu->caData+32,strPwd.toStdString().c_str(),32);
-        m_tcpSocket.write((char*)pdu,pdu->uiPDULen);
+        m_tcpSocket.write((char*)pdu,pdu->uiPDULen); // 发送数据包
         free(pdu);
         pdu = NULL;
     }else{
         QMessageBox::critical(this,"注册","注册失败：用户名或密码为空");
     }
 }
-

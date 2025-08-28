@@ -26,6 +26,8 @@ OpeWidget &OpeWidget::getInstance()
     return instance;
 }
 
+
+
 Friend *OpeWidget::getFriend()
 {
     return m_pFriend;
