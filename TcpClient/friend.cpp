@@ -1,7 +1,7 @@
 #include "friend.h"  // 包含自定义的头文件，通常包含 Friend 类的声明
 #include "tcpclient.h" // 包含 TCP 客户端类的头文件，用于网络通信
 #include <QInputDialog> // 包含 Qt 输入对话框的头文件，用于获取用户输入
-
+#include <qmessagebox.h> // 包含 Qt 消息框的头文件，用于显示消息
 // Friend 类的构造函数，QWidget *parent 参数指定了父窗口
 Friend::Friend(QWidget *parent)
     : QWidget{parent}
@@ -16,9 +16,9 @@ Friend::Friend(QWidget *parent)
 
     // 实例化操作按钮
     // 删除好友按钮
-    m_pDelFriendPB = new QPushButton("删除");
+    m_pDelFriendPB = new QPushButton("删除好友");
     // 刷新好友列表按钮
-    m_pFlushFriendPB = new QPushButton("刷新");
+    m_pFlushFriendPB = new QPushButton("显示好友列表");
     // 显示在线用户按钮
     m_pShowOnlineUsrPB = new QPushButton("显示在线用户");
     // 查找用户按钮
@@ -61,10 +61,13 @@ Friend::Friend(QWidget *parent)
     setLayout(pMainVBL);
 
     // 连接信号和槽：当“显示在线用户”按钮被点击时，触发 showOnline() 槽函数
-    connect(m_pShowOnlineUsrPB,SIGNAL(clicked(bool)),this,SLOT(showOnline()));
+    connect(m_pShowOnlineUsrPB, &QPushButton::clicked, this, &Friend::showOnline); // 新写法
     // 连接信号和槽：当“查找用户”按钮被点击时，触发 searchUsr() 槽函数
-    connect(m_pSearchUsrPB,SIGNAL(clicked(bool)),this,SLOT(searchUsr()));
-    connect(m_pFlushFriendPB,SIGNAL(clicked(bool)),this,SLOT(flushFriend()));
+    connect(m_pSearchUsrPB, &QPushButton::clicked, this, &Friend::searchUsr); // 新写法
+    // 连接信号和槽：当“刷新好友列表”按钮被点击时，触发 flushFriend() 槽函数
+    connect(m_pFlushFriendPB, &QPushButton::clicked, this, &Friend::flushFriend); // 新写法
+    // 连接信号和槽：当“删除好友”按钮被点击时，触发 delFriend() 槽函数
+    connect(m_pDelFriendPB, &QPushButton::clicked, this, &Friend::delFriend); // 新写法
 }
 
 // 槽函数：显示所有在线用户
@@ -147,4 +150,50 @@ void Friend::flushFriend()
     TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
     free(pdu);
     pdu = NULL;
+}
+
+void Friend::delFriend()
+{
+    if (m_pFriendListWidget->currentItem() == NULL) {
+        QMessageBox::warning(this, "删除好友", "请先在列表中选择要删除的好友。");
+        return;
+    }
+    // 获取完整的字符串，例如 "jack(在线)"
+    QString strfriendInfo = m_pFriendListWidget->currentItem()->text();
+
+    // 提取纯粹的用户名，通过查找左括号 '(' 来分割
+    int pos = strfriendInfo.indexOf('(');
+    QString strfriendName;
+    if (pos != -1) {
+        strfriendName = strfriendInfo.left(pos);
+    } else {
+        // 如果没有括号，则说明是纯用户名，直接使用
+        strfriendName = strfriendInfo;
+    }
+    QString questionText = QString("您确定要删除好友 %1 吗？\n此操作不可恢复。").arg(strfriendName);
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, // 父窗口
+                                  "删除好友确认", // 对话框标题
+                                  questionText, // 对话框内容
+                                  QMessageBox::Yes | QMessageBox::No, // 显示“是”和“否”两个按钮
+                                  QMessageBox::No); // 默认选中的按钮是“否”
+
+    if (reply == QMessageBox::Yes) {
+        // 如果用户点击了“是”，才执行真正的删除逻辑（即发送请求给服务器）
+        // 这部分代码就是您原来函数里的网络请求代码
+        PDU *pdu = mkPDU(0);
+        pdu->uiMsgType = ENUM_MSG_TYPE_DEL_FRIEND_REQUEST;
+        QString strMyName = TcpClient::getInstance().getLoginName();
+
+        // 确保数据顺序正确：自己的名字在前，好友的名字在后
+        strncpy(pdu->caData, strMyName.toStdString().c_str(), 32);
+        pdu->caData[31] = '\0';
+
+        strncpy(pdu->caData + 32, strfriendName.toStdString().c_str(), 32);
+        pdu->caData[63] = '\0';
+
+        TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
+        free(pdu);
+        pdu = NULL;
+    }// 如果用户点击了“否”，则什么也不做，函数直接结束。
 }

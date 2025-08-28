@@ -168,6 +168,23 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getFriend()->showAllFriend(pdu); // 调用 Friend 类方法显示好友列表
         break;
     }
+    // 删除好友通知
+    case ENUM_MSG_TYPE_DEL_FRIEND_NOTICE:{
+        char caName[32] = {'\0'};
+        strncpy(caName, pdu->caData, 32);
+        QMessageBox::information(this, "好友关系", QString("%1 删除你为好友").arg(caName));
+
+        break;
+    }
+    case ENUM_MSG_TYPE_DEL_FRIEND_RESPOND:{
+        QMessageBox::information(this,"删除好友",pdu->caData);
+        if (strcmp(pdu->caData, "删除好友成功") == 0) {
+            // 主动请求刷新好友列表
+            OpeWidget::getInstance().getFriend()->showAllFriend(pdu);
+        }
+        break;
+    }
+
     default:
         break;
     }

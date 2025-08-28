@@ -34,18 +34,17 @@ void MyTcpServer::incomingConnection(qintptr socketDescriptor)
 // 参数：pername - 目标用户的名字，pdu - 要发送的数据包
 void MyTcpServer::resend(const char *pername, PDU *pdu)
 {
-    // 输入参数检查
-    if(pername == NULL || pdu == NULL){
+    if (pername == NULL || pdu == NULL) {
         return;
     }
 
     QString strName = pername;
     // 遍历所有已连接的客户端
-    for(int i = 0; i < m_tcpSocketList.size(); i++){
+    for (int i = 0; i < m_tcpSocketList.size(); i++) {
         // 查找与目标用户名匹配的客户端
-        if(m_tcpSocketList.at(i)->getName() == strName){
+        if (m_tcpSocketList.at(i)->getName() == strName) {
             // 找到后，将数据包发送给该客户端
-            m_tcpSocketList.at(i)->write((char*)pdu,pdu->uiPDULen);
+            m_tcpSocketList.at(i)->write((char*)pdu, pdu->uiPDULen);
             break; // 找到并发送后，退出循环
         }
     }

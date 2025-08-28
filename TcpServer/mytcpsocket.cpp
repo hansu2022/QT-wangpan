@@ -236,6 +236,48 @@ void MyTcpSocket::recvMsg()
         respdu = NULL;
         break;
     }
+    // 处理删除好友请求
+    case ENUM_MSG_TYPE_DEL_FRIEND_REQUEST:
+    {
+        // 1. 正确解析请求者和被删除者
+        char caMyName[32] = {'\0'};     // 请求删除的人 (自己)
+        char caFriendName[32] = {'\0'}; // 被删除的人 (好友)
+        strncpy(caMyName, pdu->caData, 32);
+        strncpy(caFriendName, pdu->caData + 32, 32);
+
+        // 调用数据库执行删除操作
+        bool ret = OpeDB::getInstance().handleDelFriend(caMyName, caFriendName);
+
+        // 2. 准备给请求者的响应
+        PDU* respdu = mkPDU(0);
+        respdu->uiMsgType = ENUM_MSG_TYPE_DEL_FRIEND_RESPOND;
+
+        if (ret) {
+            // 如果数据库操作成功
+            strcpy(respdu->caData, "删除好友成功");
+
+            // 3. 关键：创建并发送通知给被删除者
+            PDU* noticePdu = mkPDU(0);
+            // 4. 使用正确的通知消息类型！
+            noticePdu->uiMsgType = ENUM_MSG_TYPE_DEL_FRIEND_NOTICE;
+            strncpy(noticePdu->caData, caMyName, 32); // 把删除者的名字放入通知中
+
+            // 通过 resend 函数将通知转发给被删除的好友
+            MyTcpServer::getInstance().resend(caFriendName, noticePdu);
+
+            free(noticePdu);
+            noticePdu = NULL;
+        } else {
+            // 如果数据库操作失败
+            strcpy(respdu->caData, "删除好友失败");
+        }
+
+        // 将操作结果响应给发起删除请求的客户端
+        write((char*)respdu, respdu->uiPDULen);
+        free(respdu);
+        respdu = NULL;
+        break;
+    }
     default:
         break;
     }

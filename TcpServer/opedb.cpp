@@ -259,3 +259,55 @@ QStringList OpeDB::handleFlushFriend(const char *name)
 
     return strFriendList;
 }
+
+bool OpeDB::handleDelFriend(const char *name, const char *pername)
+{
+    if (name == NULL || pername == NULL) {
+        return false;
+    }
+
+    QSqlQuery query;
+    int myId = -1, friendId = -1;
+
+    // 1. 查询自己的ID
+    query.prepare("SELECT id FROM usrInfo WHERE name = ?");
+    query.addBindValue(QString(name));
+    if (query.exec() && query.next()) {
+        myId = query.value(0).toInt();
+    } else {
+        qDebug() << "错误：未找到用户ID for " << name;
+        return false;
+    }
+
+    // 2. 查询好友的ID
+    query.prepare("SELECT id FROM usrInfo WHERE name = ?");
+    query.addBindValue(QString(pername));
+    if (query.exec() && query.next()) {
+        friendId = query.value(0).toInt();
+    } else {
+        qDebug() << "错误：未找到好友ID for " << pername;
+        return false;
+    }
+
+    // 如果任一ID未找到，则返回失败
+    if (myId == -1 || friendId == -1) {
+        return false;
+    }
+
+    // 3. 执行删除操作
+    // 使用 IN 条件来匹配双向的好友关系
+    QString strSql = "DELETE FROM friend WHERE (id = ? AND friendId = ?) OR (id = ? AND friendId = ?)";
+    query.prepare(strSql);
+    query.addBindValue(myId);
+    query.addBindValue(friendId);
+    query.addBindValue(friendId);
+    query.addBindValue(myId);
+
+    if (!query.exec()) {
+        qDebug() << "删除好友失败：";
+        return false;
+    }
+
+    qDebug() << "成功删除好友" << pername << "与用户" << name << "之间的关系。";
+    return true;
+}
