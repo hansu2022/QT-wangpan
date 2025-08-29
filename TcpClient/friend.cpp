@@ -202,6 +202,7 @@ void Friend::delFriend()
     }// 如果用户点击了“否”，则什么也不做，函数直接结束。
 }
 
+// 槽函数：处理“私聊”按钮的点击事件
 void Friend::privateChat()
 {
     if(m_pFriendListWidget->currentItem() == NULL){
