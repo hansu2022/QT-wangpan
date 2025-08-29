@@ -253,10 +253,6 @@ QStringList OpeDB::handleFlushFriend(const char *name)
         strFriendList.append(friendInfo);
     }
 
-    // 添加日志：记录查询到的好友数量和具体内容
-    qDebug() << QString("查询用户 '%1' 的好友列表成功，共找到 %2 个好友。").arg(name).arg(strFriendList.size());
-    qDebug() << "好友列表内容：" << strFriendList;
-
     return strFriendList;
 }
 

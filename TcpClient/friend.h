@@ -25,10 +25,12 @@ public slots:
     void flushFriend();
     void delFriend();
     void privateChat();
+    void groupMsgSend();
+void updateGroupMsg(QString strMsg);
 private:
     QTextEdit *m_pShowMsgTE;
     QListWidget *m_pFriendListWidget;
-    QLineEdit *M_pInputMsgLE;
+    QLineEdit *m_pInputMsgLE;
     QPushButton *m_pDelFriendPB;
     QPushButton *m_pFlushFriendPB;
     QPushButton *m_pShowOnlineUsrPB;

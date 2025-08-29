@@ -199,6 +199,14 @@ void TcpClient::recvMsg()
         privateChat.updateMsg(pdu); // 更新私聊窗口消息
         break;
     }
+    case ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:{
+        char caSendName[32] = {'\0'};
+        strncpy(caSendName,pdu->caData,32); // 提取发送者名字
+        QString strMsg = QString("%1: %2").arg(caSendName).arg(pdu->caMsg); // 格式化消息
+        OpeWidget::getInstance().getFriend()->updateGroupMsg(strMsg); // 更新群聊消息显示
+        break;
+    }
+
     default:
         break;
     }

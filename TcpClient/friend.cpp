@@ -14,7 +14,7 @@ Friend::Friend(QWidget *parent)
     // 好友列表
     m_pFriendListWidget = new QListWidget;
     // 消息输入框
-    M_pInputMsgLE = new QLineEdit;
+    m_pInputMsgLE = new QLineEdit;
 
     // 实例化操作按钮
     // 删除好友按钮
@@ -26,7 +26,7 @@ Friend::Friend(QWidget *parent)
     // 查找用户按钮
     m_pSearchUsrPB = new QPushButton("查找用户");
     // 发送消息按钮
-    m_pMsgSendPB = new QPushButton("发送");
+    m_pMsgSendPB = new QPushButton("群发信息");
     // 私聊按钮
     m_pPrivateChatPB = new QPushButton("私聊");
 
@@ -46,7 +46,7 @@ Friend::Friend(QWidget *parent)
 
     // 创建消息输入和发送按钮的水平布局
     QHBoxLayout *pMsgHBL = new QHBoxLayout;
-    pMsgHBL->addWidget(M_pInputMsgLE);
+    pMsgHBL->addWidget(m_pInputMsgLE);
     pMsgHBL->addWidget(m_pMsgSendPB);
 
     // 实例化一个在线用户列表窗口
@@ -72,6 +72,8 @@ Friend::Friend(QWidget *parent)
     connect(m_pDelFriendPB, &QPushButton::clicked, this, &Friend::delFriend); // 新写法
     // 连接信号和槽：当“私聊”按钮被点击时，触发 privateChat() 槽函数
     connect(m_pPrivateChatPB, &QPushButton::clicked, this, &Friend::privateChat); // 新写法
+    // 连接信号和槽：当“发送消息”按钮被点击时，触发 groupMsgSend() 槽函数
+    connect(m_pMsgSendPB, &QPushButton::clicked, this, &Friend::groupMsgSend); // 新写法
 }
 
 // 槽函数：显示所有在线用户
@@ -229,5 +231,33 @@ void Friend::privateChat()
 
     if(privateChat.isHidden()){
         privateChat.show();
+    }
+}
+
+void Friend::groupMsgSend()
+{
+    QString strMsg = m_pInputMsgLE->text();
+
+    if(!strMsg.isEmpty()){
+        PDU *pdu = mkPDU(strMsg.size()+1);
+        pdu->uiMsgType = ENUM_MSG_TYPE_GROUP_CHAT_REQUEST;
+        QString strLoginName = TcpClient::getInstance().getLoginName();
+        strncpy(pdu->caData,strLoginName.toStdString().c_str(),32);
+        strcpy(pdu->caMsg,strMsg.toStdString().c_str());
+        TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
+        free(pdu);
+        pdu = NULL;
+        QString strShowMsg = QString("我：%1").arg(strMsg);
+        m_pShowMsgTE->append(strShowMsg);
+        m_pInputMsgLE->clear();
+    }else{
+        QMessageBox::critical(this,"发送消息","发送消息不能为空");
+    }
+}
+
+void Friend::updateGroupMsg(QString strMsg)
+{
+    if (m_pShowMsgTE != NULL) {
+        m_pShowMsgTE->append(strMsg);
     }
 }

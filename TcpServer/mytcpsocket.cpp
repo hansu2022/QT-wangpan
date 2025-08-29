@@ -285,6 +285,30 @@ void MyTcpSocket::recvMsg()
         MyTcpServer::getInstance().resend(caPerName,pdu);
         break;
     }
+    case ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:{
+        char caSendName[32] = {'\0'};
+        strncpy(caSendName, pdu->caData, 32); // 1. 获取发送者名字
+
+        // 2. 查询发送者的所有好友及其在线状态
+        QStringList friendList = OpeDB::getInstance().handleFlushFriend(caSendName);
+
+        // 3. 遍历好友列表
+        for (const QString &friendInfo : friendList) {
+            // friendInfo 的格式是 "friendName(在线)" 或 "friendName(不在线)"
+            int pos = friendInfo.indexOf('(');
+            if (pos != -1) {
+                QString friendName = friendInfo.left(pos);
+                QString status = friendInfo.mid(pos + 1, 2); // 提取 "在线" 或 "不在线"
+
+                // 4. 判断好友是否在线
+                if (status == "在线") {
+                    // 5. 如果在线，则转发消息
+                    MyTcpServer::getInstance().resend(friendName.toStdString().c_str(), pdu);
+                }
+            }
+        }
+        break;
+    }
     default:
         break;
     }
