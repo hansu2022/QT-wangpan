@@ -278,6 +278,13 @@ void MyTcpSocket::recvMsg()
         respdu = NULL;
         break;
     }
+    case ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST:{
+        char caPerName[32] = {'\0'}; // 接收者名字
+        strncpy(caPerName,pdu->caData+32,32); // 复制接收者名字
+        // 通过 MyTcpServer 的 resend 方法转发私聊消息给接收者
+        MyTcpServer::getInstance().resend(caPerName,pdu);
+        break;
+    }
     default:
         break;
     }

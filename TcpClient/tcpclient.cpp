@@ -4,7 +4,7 @@
 #include <QDebug>         // 提供 qDebug() 函数，用于调试输出
 #include <QMessageBox>    // 提供 QMessageBox 类，用于显示消息框
 #include <QHostAddress>   // 提供 QHostAddress 类，用于处理 IP 地址
-
+#include "privatechat.h"
 // TcpClient 类的构造函数
 TcpClient::TcpClient(QWidget *parent)
     : QWidget(parent)
@@ -176,6 +176,7 @@ void TcpClient::recvMsg()
 
         break;
     }
+    // 删除好友响应
     case ENUM_MSG_TYPE_DEL_FRIEND_RESPOND:{
         QMessageBox::information(this,"删除好友",pdu->caData);
         if (strcmp(pdu->caData, "删除好友成功") == 0) {
@@ -184,7 +185,20 @@ void TcpClient::recvMsg()
         }
         break;
     }
-
+    //
+    case ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST:{
+        char caSendName[32] = {'\0'};
+        strncpy(caSendName,pdu->caData,32);
+        QString strSendName = QString(caSendName);
+        PrivateChat &privateChat = PrivateChat::getInstance();
+        if(privateChat.isHidden()){
+            privateChat.show();
+            privateChat.setChatName(strSendName); // 设置聊天对象为消息发送者
+            privateChat.setWindowTitle(QString("与 %1 的私聊").arg(strSendName));
+        }
+        privateChat.updateMsg(pdu); // 更新私聊窗口消息
+        break;
+    }
     default:
         break;
     }

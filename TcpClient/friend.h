@@ -15,6 +15,7 @@ public:
     explicit Friend(QWidget *parent = nullptr);
     void showAllOnlineUsr(PDU *pdu);
     void showAllFriend(PDU *pdu);
+
     QString m_strSearchName;
 signals:
 
@@ -23,6 +24,7 @@ public slots:
     void searchUsr();
     void flushFriend();
     void delFriend();
+    void privateChat();
 private:
     QTextEdit *m_pShowMsgTE;
     QListWidget *m_pFriendListWidget;

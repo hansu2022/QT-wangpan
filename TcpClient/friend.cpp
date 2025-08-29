@@ -2,7 +2,9 @@
 #include "tcpclient.h" // 包含 TCP 客户端类的头文件，用于网络通信
 #include <QInputDialog> // 包含 Qt 输入对话框的头文件，用于获取用户输入
 #include <qmessagebox.h> // 包含 Qt 消息框的头文件，用于显示消息
+#include "privatechat.h"
 // Friend 类的构造函数，QWidget *parent 参数指定了父窗口
+
 Friend::Friend(QWidget *parent)
     : QWidget{parent}
 {
@@ -68,6 +70,8 @@ Friend::Friend(QWidget *parent)
     connect(m_pFlushFriendPB, &QPushButton::clicked, this, &Friend::flushFriend); // 新写法
     // 连接信号和槽：当“删除好友”按钮被点击时，触发 delFriend() 槽函数
     connect(m_pDelFriendPB, &QPushButton::clicked, this, &Friend::delFriend); // 新写法
+    // 连接信号和槽：当“私聊”按钮被点击时，触发 privateChat() 槽函数
+    connect(m_pPrivateChatPB, &QPushButton::clicked, this, &Friend::privateChat); // 新写法
 }
 
 // 槽函数：显示所有在线用户
@@ -196,4 +200,33 @@ void Friend::delFriend()
         free(pdu);
         pdu = NULL;
     }// 如果用户点击了“否”，则什么也不做，函数直接结束。
+}
+
+void Friend::privateChat()
+{
+    if(m_pFriendListWidget->currentItem() == NULL){
+        QMessageBox::warning(this,"私聊","请先在列表中选择一个好友");
+        return;
+    }
+    QString strName = m_pFriendListWidget->currentItem()->text();
+    int pos = strName.indexOf('(');
+    QString strfriendName;
+    if (pos != -1) {
+        strfriendName = strName.left(pos);
+    } else {
+        // 如果没有括号，则说明是纯用户名，直接使用
+        strfriendName = strName;
+    }
+    PrivateChat &privateChat = PrivateChat::getInstance();
+
+    if(PrivateChat::getInstance().isHidden()){
+        privateChat.show();
+    }
+    privateChat.clearMsg();
+    privateChat.setChatName(strfriendName); // 设置聊天对象的名字
+    privateChat.setWindowTitle(QString("与 %1 的私聊").arg(strfriendName)); // 设置窗口标题
+
+    if(privateChat.isHidden()){
+        privateChat.show();
+    }
 }
