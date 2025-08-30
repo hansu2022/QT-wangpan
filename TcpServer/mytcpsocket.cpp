@@ -279,68 +279,159 @@ void MyTcpSocket::recvMsg()
         respdu = NULL;
         break;
     }
+    // 处理私聊请求
     case ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST:{
-        char caPerName[32] = {'\0'}; // 接收者名字
-        strncpy(caPerName,pdu->caData+32,32); // 复制接收者名字
-        // 通过 MyTcpServer 的 resend 方法转发私聊消息给接收者
+        // 声明一个字符数组用于存储消息接收者的名字，并初始化为全0
+        char caPerName[32] = {'\0'};
+        // 从PDU（协议数据单元）的caData字段中偏移32个字节处，复制消息接收者的名字
+        strncpy(caPerName,pdu->caData+32,32);
+        // 通过 MyTcpServer 的单例，调用 resend 方法将私聊消息转发给指定接收者
         MyTcpServer::getInstance().resend(caPerName,pdu);
         break;
     }
+    // 处理群聊请求
     case ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:{
+        // 声明一个字符数组用于存储消息发送者的名字
         char caSendName[32] = {'\0'};
-        strncpy(caSendName, pdu->caData, 32); // 1. 获取发送者名字
+        // 从PDU的caData字段中复制发送者名字
+        strncpy(caSendName, pdu->caData, 32);
 
-        // 2. 查询发送者的所有好友及其在线状态
+        // 1. 调用数据库操作类 OpeDB 的 handleFlushFriend 方法，查询发送者的所有好友及其在线状态
         QStringList friendList = OpeDB::getInstance().handleFlushFriend(caSendName);
 
-        // 3. 遍历好友列表
+        // 2. 遍历好友列表
         for (const QString &friendInfo : friendList) {
-            // friendInfo 的格式是 "friendName(在线)" 或 "friendName(不在线)"
+            // friendInfo 的格式为 "friendName(在线)" 或 "friendName(不在线)"
+            // 找到名字和状态之间的左括号位置
             int pos = friendInfo.indexOf('(');
             if (pos != -1) {
+                // 提取好友的名字
                 QString friendName = friendInfo.left(pos);
-                QString status = friendInfo.mid(pos + 1, 2); // 提取 "在线" 或 "不在线"
+                // 提取好友的在线状态
+                QString status = friendInfo.mid(pos + 1, 2);
 
-                // 4. 判断好友是否在线
+                // 3. 判断好友是否在线
                 if (status == "在线") {
-                    // 5. 如果在线，则转发消息
+                    // 4. 如果在线，则将群聊消息转发给该好友
                     MyTcpServer::getInstance().resend(friendName.toStdString().c_str(), pdu);
                 }
             }
         }
         break;
     }
-    case EMUM_MSG_TYPE_CREATE_DIR_REQUEST: {
+    // 处理新建文件夹请求
+    case ENUM_MSG_TYPE_CREATE_DIR_REQUEST: {
+        // 创建一个 QDir 对象，用于文件系统操作
         QDir dir;
-        QString strCurPath = QString(pdu->caMsg); // 当前路径
-        qDebug() << strCurPath;
+        // 从PDU的caMsg字段中获取当前路径
+        QString strCurPath = QString(pdu->caMsg);
+        qDebug() << strCurPath; // 打印当前路径用于调试
+
+        // 检查当前路径是否存在
         bool ret = dir.exists(strCurPath);
-        PDU *respdu = mkPDU(0); // 创建响应数据包
-        if(ret){ //
+        // 准备一个用于响应客户端的PDU
+        PDU *respdu = mkPDU(0);
+
+        if(ret){ // 如果当前路径存在
+            // 声明一个字符数组用于存储新文件夹的名称
             char caNewDir[32] = {'\0'};
-            strncpy(caNewDir, pdu->caData + 32, 32); // 新建文件夹名称
-            QString strNewPath = strCurPath + "/" + QString(caNewDir); // 新建文件夹的完整路径
-            qDebug() << strNewPath;
-            ret = dir.exists(strNewPath); // 创建文件夹
-            qDebug()<< "exists:"<< ret;
-            if(ret){
+            // 从PDU的caData字段中偏移32个字节处，复制新文件夹的名称
+            strncpy(caNewDir, pdu->caData + 32, 32);
+            // 拼接出新文件夹的完整路径
+            QString strNewPath = strCurPath + "/" + QString(caNewDir);
+            qDebug() << strNewPath; // 打印新路径用于调试
+
+            // 再次检查新文件夹是否已经存在
+            ret = dir.exists(strNewPath);
+            qDebug()<< "exists:"<< ret; // 打印检查结果用于调试
+
+            if(ret){ // 如果新文件夹已存在
                 respdu = mkPDU(0);
-                respdu->uiMsgType = EMUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+                respdu->uiMsgType = ENUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+                // 设置响应数据为“文件夹已存在，创建文件夹失败”
                 strcpy(respdu->caData,"文件夹已存在，创建文件夹失败");
-            }else{
-                dir.mkdir(strNewPath);
+            }else{ // 如果新文件夹不存在
+                dir.mkdir(strNewPath); // 创建新文件夹
                 respdu = mkPDU(0);
-                respdu->uiMsgType = EMUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+                respdu->uiMsgType = ENUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+                // 设置响应数据为“创建文件夹成功”
                 strcpy(respdu->caData,"创建文件夹成功");
             }
-        }else{
+        }else{ // 如果当前路径不存在
             respdu = mkPDU(0);
-            respdu->uiMsgType = EMUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+            respdu->uiMsgType = ENUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+            // 设置响应数据为“当前路径不存在，创建文件夹失败”
             strcpy(respdu->caData,"当前路径不存在，创建文件夹失败");
         }
-        write((char*)respdu, respdu->uiPDULen); // 将响应数据包发送给客户端
-        free(respdu); // 释放内存
+        // 将响应PDU发送给客户端
+        write((char*)respdu, respdu->uiPDULen);
+        // 释放PDU占用的内存
+        free(respdu);
         respdu = NULL;
+        break;
+    }
+    // 处理刷新文件请求
+    case ENUM_MSG_TYPE_FLUSH_FILE_REQUEST:{
+        // 创建一个字符数组，用于存储当前路径
+        char *pCurPath = new char[pdu->uiMsgLen];
+        // 从PDU的caMsg字段中复制当前路径
+        strncpy(pCurPath,pdu->caMsg,pdu->uiMsgLen);
+        // 确保字符串以 '\0' 结尾
+        pCurPath[pdu->uiMsgLen - 1] = '\0';
+
+        // 创建一个 QDir 对象，传入当前路径
+        QDir dir(pCurPath);
+        // 获取当前目录下的所有文件和目录信息
+        QFileInfoList fileInfoList = dir.entryInfoList();
+
+        // 1. 统计有效的文件和目录数量（排除 "." 和 ".."）
+        int iFileCount = 0;
+        for(int i=0; i<fileInfoList.size(); ++i) {
+            if(fileInfoList.at(i).fileName() == "." || fileInfoList.at(i).fileName() == "..") {
+                continue;
+            }
+            iFileCount++;
+        }
+
+        // 2. 根据有效文件数量创建响应PDU
+        PDU *respdu = mkPDU(iFileCount * sizeof(FileInfo));
+        respdu->uiMsgType = ENUM_MSG_TYPE_FLUSH_FILE_RESPOND;
+        // 指向PDU消息内容的起始位置
+        FileInfo *pFileInfo = (FileInfo*)(respdu->caMsg);
+        int currentIndex = 0; // 用于跟踪已填充的文件信息数量
+
+        // 3. 再次遍历文件信息列表并填充PDU
+        for(int i=0; i<fileInfoList.size(); ++i){
+            // 忽略 "." 和 ".." 目录
+            if(fileInfoList.at(i).fileName() == "." || fileInfoList.at(i).fileName() == ".."){
+                continue;
+            }
+
+            // 根据当前索引计算当前 FileInfo 结构体的位置
+            pFileInfo = (FileInfo*)(respdu->caMsg + currentIndex * sizeof(FileInfo));
+            QString strFileName = fileInfoList.at(i).fileName();
+
+            // 安全地将文件名拷贝到 FileInfo 结构体中，并确保以空字符结尾
+            strncpy(pFileInfo->caFileName, strFileName.toStdString().c_str(), 31);
+            pFileInfo->caFileName[31] = '\0';
+
+            // 根据文件类型设置 iFileType 字段（0为目录，1为文件）
+            if(fileInfoList[i].isDir()){
+                pFileInfo->iFileType = 0;
+            } else if (fileInfoList[i].isFile()){
+                pFileInfo->iFileType = 1;
+            }
+            currentIndex++; // 索引加一，准备填充下一个文件信息
+        }
+
+        // 将响应PDU发送给客户端
+        write((char*)respdu,respdu->uiPDULen);
+        // 释放PDU占用的内存
+        free(respdu);
+        respdu = NULL;
+        // 释放用于存储路径的字符数组内存
+        delete[] pCurPath;
+        pCurPath = NULL;
         break;
     }
     default:

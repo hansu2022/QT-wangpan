@@ -193,29 +193,51 @@ void TcpClient::recvMsg()
         }
         break;
     }
-    //
+    // 私聊好友请求
     case ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST:{
+        // 声明一个字符数组用于存储发送者的名字，并初始化为全0
         char caSendName[32] = {'\0'};
+        // 从PDU（协议数据单元）的caData字段中复制发送者名字
         strncpy(caSendName,pdu->caData,32);
+        // 将字符数组转换为QString，便于后续使用
         QString strSendName = QString(caSendName);
+        // 获取 PrivateChat 单例的引用
         PrivateChat &privateChat = PrivateChat::getInstance();
+        // 如果私聊窗口当前是隐藏状态
         if(privateChat.isHidden()){
+            // 显示私聊窗口
             privateChat.show();
-            privateChat.setChatName(strSendName); // 设置聊天对象为消息发送者
+            // 设置聊天对象的名称
+            privateChat.setChatName(strSendName);
+            // 设置窗口的标题，显示“与[发送者名字]的私聊”
             privateChat.setWindowTitle(QString("与 %1 的私聊").arg(strSendName));
         }
-        privateChat.updateMsg(pdu); // 更新私聊窗口消息
+        // 调用 updateMsg 方法，更新私聊窗口中的消息内容
+        privateChat.updateMsg(pdu);
         break;
     }
+    // 群聊请求
     case ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:{
+        // 声明一个字符数组用于存储发送者名字，并初始化为全0
         char caSendName[32] = {'\0'};
-        strncpy(caSendName,pdu->caData,32); // 提取发送者名字
-        QString strMsg = QString("%1: %2").arg(caSendName).arg(pdu->caMsg); // 格式化消息
-        OpeWidget::getInstance().getFriend()->updateGroupMsg(strMsg); // 更新群聊消息显示
+        // 从PDU的caData字段中复制发送者名字
+        strncpy(caSendName,pdu->caData,32);
+        // 格式化消息内容，将发送者名字和消息内容组合成“发送者: 消息”的格式
+        QString strMsg = QString("%1: %2").arg(caSendName).arg(pdu->caMsg);
+        // 获取 OpeWidget 单例，并调用其内部的 getFriend() 方法获取 Friend 对象，然后更新群聊消息显示
+        OpeWidget::getInstance().getFriend()->updateGroupMsg(strMsg);
         break;
     }
-    case EMUM_MSG_TYPE_CREATE_DIR_RESPOND:{
+    // 创建文件夹
+    case ENUM_MSG_TYPE_CREATE_DIR_RESPOND:{
+        // 弹出消息框，显示服务器返回的创建文件夹结果（成功或失败信息）
         QMessageBox::information(this,"创建文件夹",pdu->caData);
+        break;
+    }
+    // 刷新文件
+    case ENUM_MSG_TYPE_FLUSH_FILE_RESPOND:{
+        // 获取 OpeWidget 单例，并调用其内部的 getBook() 方法获取 Book 对象，然后调用其 flushFile() 方法刷新文件列表
+        OpeWidget::getInstance().getBook()->flushFile(pdu);
         break;
     }
     default:

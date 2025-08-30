@@ -56,10 +56,19 @@ enum ENUM_MSG_TYPE
     ENUM_MSG_TYPE_GROUP_CHAT_REQUEST,//群发在线好友请求
     ENUM_MSG_TYPE_GROUP_CHAT_RESPOND,//群发在线好友回复
 
-    EMUM_MSG_TYPE_CREATE_DIR_REQUEST, // 创建文件夹请求
-    EMUM_MSG_TYPE_CREATE_DIR_RESPOND, // 创建文件夹回复
+    ENUM_MSG_TYPE_CREATE_DIR_REQUEST, // 创建文件夹请求
+    ENUM_MSG_TYPE_CREATE_DIR_RESPOND, // 创建文件夹回复
+
+    ENUM_MSG_TYPE_FLUSH_FILE_REQUEST, //刷新文件请求
+    ENUM_MSG_TYPE_FLUSH_FILE_RESPOND, //刷新文件回复
     ENUM_MSG_TYPE_MAX = 0x00ffffff,
 };
+
+struct FileInfo{
+    char caFileName[32];
+    int iFileType;
+};
+
 
 struct PDU{
     uint uiPDULen;   // 总协议数据单元长度

@@ -22,7 +22,7 @@ OpeWidget::OpeWidget(QWidget *parent)
     pLeftVBL->addWidget(m_pListW);      // 功能列表在下方
     pLeftVBL->setSpacing(10); // 可以设置一些间距
 
-    // 4. 创建主水平布局
+    // 创建主水平布局
     QHBoxLayout *pMainHBL = new QHBoxLayout;
     pMainHBL->addLayout(pLeftVBL); // 将左侧布局添加到主布局
     pMainHBL->addWidget(m_pSW);    // 将右侧堆栈窗口添加到主布局
@@ -43,6 +43,11 @@ OpeWidget &OpeWidget::getInstance()
 Friend *OpeWidget::getFriend()
 {
     return m_pFriend;
+}
+
+Book *OpeWidget::getBook()
+{
+    return m_pBook;
 }
 
 // 实现设置用户名的方法
