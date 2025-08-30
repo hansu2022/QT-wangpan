@@ -4,6 +4,7 @@
 #include <QTcpSocket>
 #include "protocol.h"
 #include "opedb.h"
+#include <QDir>        // 提供 QDir 类，用于处理目录和文件路径
 class MyTcpSocket : public QTcpSocket
 {
     Q_OBJECT

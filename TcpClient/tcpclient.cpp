@@ -72,6 +72,11 @@ QString TcpClient::getLoginName()
     return m_strLoginName;
 }
 
+QString TcpClient::curPath()
+{
+    return m_strCurPath;
+}
+
 // 槽函数：连接成功时显示消息框
 void TcpClient::showConnect()
 {
@@ -105,7 +110,10 @@ void TcpClient::recvMsg()
     // 登录响应
     case ENUM_MSG_TYPE_LOGIN_RESPOND:{
         if(strcmp(pdu->caData,LOGIN_OK) == 0){
+            m_strLoginName = ui->name_le->text(); // 登录成功后保存当前客户端的用户名
+            m_strCurPath = QString("./%1").arg(m_strLoginName); // 设置当前路径为用户根目录
             QMessageBox::information(this,"登录",LOGIN_OK);
+            OpeWidget::getInstance().setUsrName(m_strLoginName);
             OpeWidget::getInstance().show(); // 登录成功后显示主操作窗口
             hide(); // 隐藏当前登录窗口
         }else if(strcmp(pdu->caData,LOGIN_FAILED) == 0){
@@ -206,7 +214,10 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getFriend()->updateGroupMsg(strMsg); // 更新群聊消息显示
         break;
     }
-
+    case EMUM_MSG_TYPE_CREATE_DIR_RESPOND:{
+        QMessageBox::information(this,"创建文件夹",pdu->caData);
+        break;
+    }
     default:
         break;
     }

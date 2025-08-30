@@ -48,8 +48,9 @@ void MyTcpSocket::recvMsg()
         PDU *respdu = mkPDU(0); // 创建响应数据包
         respdu->uiMsgType = ENUM_MSG_TYPE_REGIST_RESPOND; // 设置响应消息类型
         if(ret){
-            qDebug() << "success"; // 调试输出注册成功
             strcpy(respdu->caData,REGIST_OK); // 设置响应数据为注册成功
+            QDir dir;
+            dir.mkdir(caName); // 为新注册用户创建一个目录
         }else{
             qDebug() << "failed"; // 调试输出注册失败
             strcpy(respdu->caData,REGIST_FAILED); // 设置响应数据为注册失败
@@ -307,6 +308,39 @@ void MyTcpSocket::recvMsg()
                 }
             }
         }
+        break;
+    }
+    case EMUM_MSG_TYPE_CREATE_DIR_REQUEST: {
+        QDir dir;
+        QString strCurPath = QString(pdu->caMsg); // 当前路径
+        qDebug() << strCurPath;
+        bool ret = dir.exists(strCurPath);
+        PDU *respdu = mkPDU(0); // 创建响应数据包
+        if(ret){ //
+            char caNewDir[32] = {'\0'};
+            strncpy(caNewDir, pdu->caData + 32, 32); // 新建文件夹名称
+            QString strNewPath = strCurPath + "/" + QString(caNewDir); // 新建文件夹的完整路径
+            qDebug() << strNewPath;
+            ret = dir.exists(strNewPath); // 创建文件夹
+            qDebug()<< "exists:"<< ret;
+            if(ret){
+                respdu = mkPDU(0);
+                respdu->uiMsgType = EMUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+                strcpy(respdu->caData,"文件夹已存在，创建文件夹失败");
+            }else{
+                dir.mkdir(strNewPath);
+                respdu = mkPDU(0);
+                respdu->uiMsgType = EMUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+                strcpy(respdu->caData,"创建文件夹成功");
+            }
+        }else{
+            respdu = mkPDU(0);
+            respdu->uiMsgType = EMUM_MSG_TYPE_CREATE_DIR_RESPOND; // 设置响应消息类型
+            strcpy(respdu->caData,"当前路径不存在，创建文件夹失败");
+        }
+        write((char*)respdu, respdu->uiPDULen); // 将响应数据包发送给客户端
+        free(respdu); // 释放内存
+        respdu = NULL;
         break;
     }
     default:
