@@ -247,6 +247,13 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getBook()->flushFileSlot();
         break;
     }
+    // 重命名文件夹
+    case ENUM_MSG_TYPE_RENAME_DIR_RESPOND:{
+        QMessageBox::information(this,"重命名文件夹",pdu->caData);
+        // 主动请求刷新文件列表 主动调用“刷新文件”的槽函数
+        OpeWidget::getInstance().getBook()->flushFileSlot();
+        break;
+    }
     default:
         break;
     }
