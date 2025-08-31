@@ -57,6 +57,8 @@ Book::Book(QWidget *parent)
     connect(m_pRenamePB, &QPushButton::clicked, this, &Book::reName);
     // 将文件列表的双击信号连接到 entryDir 槽函数
     connect(m_pBookListw, &QListWidget::doubleClicked, this, &Book::entryDir);
+    // 将返回按钮的 clicked 信号连接到 returnDir 槽函数
+    connect(m_pReturnPB, &QPushButton::clicked, this, &Book::returnDir);
 }
 
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
@@ -262,4 +264,28 @@ void Book::entryDir(const QModelIndex &index)
     // 释放动态分配的PDU内存
     free(pdu);
     pdu = NULL;
+}
+
+// 返回上一级目录的槽函数
+void Book::returnDir()
+{
+    // 获取当前客户端的路径
+    QString strCurPath = TcpClient::getInstance().curPath();
+    // 获取根目录
+    QString strRootPath = QString("./%1").arg(TcpClient::getInstance().getLoginName());
+    //
+    if(strCurPath == strRootPath){
+        QMessageBox::warning(this,"返回","已经是根目录，无法返回");
+        return;
+    }
+    // 找到最后一个 '/' 的位置
+    int index = strCurPath.lastIndexOf('/');
+    // 截取字符串，得到上一级目录路径
+    strCurPath = strCurPath.left(index);
+    // 更新客户端的当前路径
+    TcpClient::getInstance().setEnterDirName(""); // 清空进入目录名称，表示返回上一级
+    TcpClient::getInstance().setCurPath(strCurPath);
+    // 主动请求刷新文件列表
+    flushFileSlot();
+
 }

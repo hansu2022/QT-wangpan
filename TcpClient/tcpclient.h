@@ -25,6 +25,7 @@ public:
     QString getLoginName();
     QString curPath();
     void setEnterDirName(const QString& name);
+    void setCurPath(QString setCurPath);
 public slots:
     void showConnect();
     void recvMsg();

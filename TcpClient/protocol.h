@@ -70,6 +70,7 @@ enum ENUM_MSG_TYPE
 
     ENUM_MSG_TYPE_ENTRY_DIR_REQUEST, // 进入文件夹请求
     ENUM_MSG_TYPE_ENTRY_DIR_RESPOND, // 进入文件夹回复
+
     ENUM_MSG_TYPE_MAX = 0x00ffffff,
 };
 

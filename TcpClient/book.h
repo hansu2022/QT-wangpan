@@ -16,7 +16,7 @@ public:
     void delDir();
     void reName();
     void entryDir(const QModelIndex &index);
-
+    void returnDir();
 signals:
 
 public slots:

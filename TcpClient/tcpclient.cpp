@@ -82,6 +82,11 @@ void TcpClient::setEnterDirName(const QString &name)
     m_strEnterDirName = name;
 }
 
+void TcpClient::setCurPath(QString setCurPath)
+{
+    m_strCurPath = setCurPath;
+}
+
 // 槽函数：连接成功时显示消息框
 void TcpClient::showConnect()
 {
