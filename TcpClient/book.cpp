@@ -55,6 +55,8 @@ Book::Book(QWidget *parent)
     connect(m_pDelDirPB, &QPushButton::clicked, this, &Book::delDir);
     // 将重命名按钮的 clicked 信号连接到 reName 槽函数
     connect(m_pRenamePB, &QPushButton::clicked, this, &Book::reName);
+    // 将文件列表的双击信号连接到 entryDir 槽函数
+    connect(m_pBookListw, &QListWidget::doubleClicked, this, &Book::entryDir);
 }
 
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
@@ -146,51 +148,119 @@ void Book::flushFileSlot()
     pdu = NULL;
 }
 
+// 删除文件夹的槽函数
 void Book::delDir()
 {
+    // 获取当前客户端的路径
     QString strCurPath = TcpClient::getInstance().curPath();
+    // 获取用户在列表视图中当前选中的项目
     QListWidgetItem *pItem =  m_pBookListw->currentItem();
+    // 如果没有选中任何项目，则弹出警告框并返回
     if(pItem == NULL){
         QMessageBox::warning(this,"删除文件夹","请选择要删除的文件夹");
         return;
     }
+    // 获取要删除的文件夹名称
     QString strDelName = pItem->text();
+    // 创建一个PDU（协议数据单元）结构体，用于封装请求数据。
+    // PDU的大小根据当前路径的长度动态分配。
     PDU *pdu = mkPDU(strCurPath.size()+1);
+    // 设置消息类型为“删除文件夹请求”
     pdu->uiMsgType = ENUM_MSG_TYPE_DEL_DIR_REQUEST;
+    // 将要删除的文件夹名称拷贝到 PDU 的 caData 字段中，最多32字节
     strncpy(pdu->caData,strDelName.toStdString().c_str(),32);
+    // 确保字符串以空字符结尾，防止越界
     pdu->caData[31] = '\0';
+    // 将当前路径拷贝到 PDU 的 caMsg 字段中
     strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
+    // 通过TCP socket发送PDU数据
     TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
+    // 释放动态分配的PDU内存，避免内存泄漏
     free(pdu);
     pdu = NULL;
 }
 
+// 重命名文件夹的槽函数
 void Book::reName()
 {
+    // 获取当前客户端的路径
     QString strCurPath = TcpClient::getInstance().curPath();
+    // 获取用户在列表视图中当前选中的项目
     QListWidgetItem *pItem =  m_pBookListw->currentItem();
+    // 如果没有选中任何项目，则弹出警告框并返回
     if(pItem == NULL){
         QMessageBox::warning(this,"重命名","请选择要重命名的文件");
         return;
     }
+    // 获取要重命名的旧文件/文件夹名称
     QString strOldName = pItem->text();
+    // 弹出一个输入对话框，让用户输入新的文件/文件夹名称
     QString strNewName = QInputDialog::getText(this, "重命名", "请输入新的文件名称:");
+    // 检查用户输入的新名称是否为空
     if(!strNewName.isEmpty()){
+        // 检查新名称的长度是否超过32个字符
         if(strNewName.size()>32){
             QMessageBox::warning(this,"重命名","文件名称过长，不能超过32个字符");
         }else{
+            // 创建一个PDU，用于封装重命名请求
             PDU *pdu = mkPDU(strCurPath.size()+1);
+            // 设置消息类型为“重命名请求”
             pdu->uiMsgType = ENUM_MSG_TYPE_RENAME_DIR_REQUEST;
+            // 将旧名称拷贝到PDU的caData字段的前32字节
             strncpy(pdu->caData,strOldName.toStdString().c_str(),32);
+            // 确保旧名称字符串以空字符结尾
             pdu->caData[31] = '\0';
+            // 将新名称拷贝到caData字段的后32字节
             strncpy(pdu->caData+32,strNewName.toStdString().c_str(),32);
+            // 确保新名称字符串以空字符结尾
             pdu->caData[63] = '\0';
+            // 将当前路径拷贝到 PDU 的 caMsg 字段中
             strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
+            // 通过TCP socket发送PDU数据
             TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
+            // 释放动态分配的PDU内存
             free(pdu);
             pdu = NULL;
         }
     }else{
-        QMessageBox::warning(this,"重命名","文件夹名称不能为空");
+        // 如果新名称为空，弹出警告框
+        QMessageBox::warning(this,"重命名","文件名称不能为空");
     }
+}
+
+// 进入文件夹的槽函数
+void Book::entryDir(const QModelIndex &index)
+{
+    // 获取被双击的 QListWidgetItem
+    QListWidgetItem *item = m_pBookListw->item(index.row());
+    // 如果获取失败，直接返回
+    if (!item) return;
+    // 从项目数据中取出之前存储的类型信息（Qt::UserRole 是一个自定义角色）
+    int itemType = item->data(Qt::UserRole).toInt();
+    // 如果类型不为0（0代表文件夹），则表示双击的不是文件夹，直接返回，不发送请求
+    if (itemType != 0) { // 0 代表文件夹
+        return;
+    }
+    // 获取被双击的文件夹名称
+    QString strDirName = item->text();
+    // 将要进入的文件夹名称存储到客户端实例中，以便后续使用（注意这里调用了两次，可能是一个冗余或特定逻辑）
+    TcpClient::getInstance().setEnterDirName(strDirName);
+    TcpClient::getInstance().setEnterDirName(strDirName);
+    // 获取当前客户端的路径
+    QString strCurPath = TcpClient::getInstance().curPath();
+    // 创建一个PDU，用于封装“进入文件夹”请求
+    PDU *pdu = mkPDU(strCurPath.size()+1);
+    // 设置消息类型为“进入文件夹请求”
+    pdu->uiMsgType = ENUM_MSG_TYPE_ENTRY_DIR_REQUEST;
+    // 将要进入的文件夹名称拷贝到PDU的caData字段中，最多32字节
+    strncpy(pdu->caData,strDirName.toStdString().c_str(),32);
+    // 确保字符串以空字符结尾
+    pdu->caData[31] = '\0';
+    // 将当前路径拷贝到PDU的caMsg字段中
+    strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
+    // 通过TCP socket发送PDU数据
+    TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
+    // 释放动态分配的PDU内存
+    free(pdu);
+    pdu = NULL;
 }

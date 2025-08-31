@@ -15,6 +15,7 @@ public:
     void flushFile(const PDU *pdu);
     void delDir();
     void reName();
+    void entryDir(const QModelIndex &index);
 
 signals:
 

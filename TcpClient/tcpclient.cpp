@@ -77,6 +77,11 @@ QString TcpClient::curPath()
     return m_strCurPath;
 }
 
+void TcpClient::setEnterDirName(const QString &name)
+{
+    m_strEnterDirName = name;
+}
+
 // 槽函数：连接成功时显示消息框
 void TcpClient::showConnect()
 {
@@ -232,12 +237,28 @@ void TcpClient::recvMsg()
     case ENUM_MSG_TYPE_CREATE_DIR_RESPOND:{
         // 弹出消息框，显示服务器返回的创建文件夹结果（成功或失败信息）
         QMessageBox::information(this,"创建文件夹",pdu->caData);
+        // 主动请求刷新文件列表 主动调用“刷新文件”的槽函数
+        OpeWidget::getInstance().getBook()->flushFileSlot();
         break;
     }
-    // 刷新文件
+    // 刷新文件（包括成功进入文件夹）
     case ENUM_MSG_TYPE_FLUSH_FILE_RESPOND:{
-        // 获取 OpeWidget 单例，并调用其内部的 getBook() 方法获取 Book 对象，然后调用其 flushFile() 方法刷新文件列表
+        // 1. 首先，做一个健壮性检查
+        if (strcmp(pdu->caData, "success") != 0) {
+            // 如果caData不是"success"，说明可能是一个意外的或错误的响应
+            QMessageBox::critical(this, "错误", "刷新文件失败：未知的服务器响应。");
+            break; // 直接退出，不再继续处理
+        }
+
+        // 2. 处理路径更新（只有在进入文件夹时才需要）
+        if (!m_strEnterDirName.isEmpty()) {
+            m_strCurPath = QString("%1/%2").arg(m_strCurPath).arg(m_strEnterDirName);
+            m_strEnterDirName.clear(); // 用完后清空，非常好的习惯！
+        }
+
+        // 3. 更新UI（无论如何都需要）
         OpeWidget::getInstance().getBook()->flushFile(pdu);
+
         break;
     }
     // 删除文件夹
@@ -252,6 +273,12 @@ void TcpClient::recvMsg()
         QMessageBox::information(this,"重命名文件夹",pdu->caData);
         // 主动请求刷新文件列表 主动调用“刷新文件”的槽函数
         OpeWidget::getInstance().getBook()->flushFileSlot();
+        break;
+    }
+    // 单独处理进入文件夹失败的响应
+    case ENUM_MSG_TYPE_ENTRY_DIR_RESPOND: {
+        // 能进入这个case的，都是进入失败的响应
+        QMessageBox::warning(this, "进入文件夹", pdu->caData);
         break;
     }
     default:

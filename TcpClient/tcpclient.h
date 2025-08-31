@@ -24,6 +24,7 @@ public:
     QTcpSocket& getTcpSocket();
     QString getLoginName();
     QString curPath();
+    void setEnterDirName(const QString& name);
 public slots:
     void showConnect();
     void recvMsg();
@@ -46,5 +47,6 @@ private:
     QString m_strLoginName;
     // 当前路径
     QString m_strCurPath;
+    QString m_strEnterDirName; // 进入的文件夹名称
 };
 #endif // TCPCLIENT_H
