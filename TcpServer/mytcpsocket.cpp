@@ -436,90 +436,46 @@ void MyTcpSocket::recvMsg()
         pCurPath = NULL;
         break;
     }
-    // 处理删除文件夹请求
-    case ENUM_MSG_TYPE_DEL_DIR_REQUEST:{
-        // 从PDU的caData字段中获取要删除的文件夹名称
+
+    //
+    case ENUM_MSG_TYPE_DEL_ITEM_REQUEST:{
         char caName[32] = {'\0'};
-        strcpy(caName,pdu->caData);
-        // 从PDU的caMsg字段中获取当前路径，并动态分配内存
+        strncpy(caName, pdu->caData, 32); // 获取用户名
         char *pPath = new char[pdu->uiMsgLen];
-        strncpy(pPath,pdu->caMsg,pdu->uiMsgLen);
-        // 确保路径字符串以空字符结尾
+        strncpy(pPath, pdu->caMsg, pdu->uiMsgLen);
         pPath[pdu->uiMsgLen-1] = '\0';
-        // 拼接成完整的删除路径
         QString strPath = QString("%1/%2").arg(pPath).arg(caName);
-        // 使用QFileInfo检查路径的有效性
+
         QFileInfo fileInfo(strPath);
         bool ret = false;
-        // 判断是否为文件夹
         if(fileInfo.isDir()){
-            // 如果是文件夹，创建一个QDir对象
-            QDir dir;
-            dir.setPath(strPath);
-            // 递归删除文件夹及其内容
-            ret = dir.removeRecursively();
+            ret = QDir(strPath).removeRecursively();
         }else if(fileInfo.isFile()){
-            // 如果是文件，不执行删除操作，返回失败
-            ret = false;
+            ret = QFile::remove(strPath);
         }
-        // 创建响应PDU
         PDU *respdu = NULL;
-        // 根据删除结果设置响应消息
         if(ret){
             respdu = mkPDU(0);
-            respdu->uiMsgType = ENUM_MSG_TYPE_DEL_DIR_RESPOND;
-            strcpy(respdu->caData,"删除文件夹成功");
+            respdu->uiMsgType = ENUM_MSG_TYPE_DEL_ITEM_RESPOND;
+            strcpy(respdu->caData,"删除成功");
         }else{
             respdu = mkPDU(0);
-            respdu->uiMsgType = ENUM_MSG_TYPE_DEL_DIR_RESPOND;
-            strcpy(respdu->caData,"删除文件夹失败");
+            respdu->uiMsgType = ENUM_MSG_TYPE_DEL_ITEM_RESPOND;
+            // 提供失败原因
+            if (!fileInfo.exists()) {
+                strcpy(respdu->caData, "删除失败：项目不存在");
+            } else {
+                strcpy(respdu->caData, "删除失败：权限不足或未知错误");
+            }
         }
-        // 发送响应PDU给客户端
-        write((char*)respdu,respdu->uiPDULen);
-        // 释放内存
+        write((char*)respdu, respdu->uiPDULen);
         free(respdu);
         respdu = NULL;
         delete[] pPath;
         pPath = NULL;
         break;
     }
-    // 处理重命名文件夹请求
-    case ENUM_MSG_TYPE_RENAME_DIR_REQUEST:{
-        // 从PDU的caData字段中分别获取旧名称和新名称
-        char caOldName[32] = {'\0'};
-        char caNewName[32] = {'\0'};
-        strncpy(caOldName,pdu->caData,32);
-        strncpy(caNewName,pdu->caData+32,32);
-        // 从PDU的caMsg字段中获取当前路径，并动态分配内存
-        char *pPath = new char[pdu->uiMsgLen];
-        strncpy(pPath,pdu->caMsg,pdu->uiMsgLen);
-        pPath[pdu->uiMsgLen-1] = '\0';
-        // 拼接旧路径和新路径
-        QString strOldPath = QString("%1/%2").arg(pPath).arg(caOldName);
-        QString strNewPath = QString("%1/%2").arg(pPath).arg(caNewName);
-        QFileInfo fileInfo(strOldPath);
-        // 创建QDir对象
-        QDir dir;
-        // 执行重命名操作
-        bool ret = dir.rename(strOldPath,strNewPath);
-        // 创建响应PDU
-        PDU *respdu = mkPDU(0);
-        respdu->uiMsgType = ENUM_MSG_TYPE_RENAME_DIR_RESPOND;
-        // 根据重命名结果设置响应消息
-        if(ret){
-            strcpy(respdu->caData,"重命名成功");
-        }else{
-            strcpy(respdu->caData,"重命名失败");
-        }
-        // 发送响应PDU
-        write((char*)respdu,respdu->uiPDULen);
-        // 释放内存
-        free(respdu);
-        respdu = NULL;
-        delete[] pPath;
-        pPath = NULL;
-        break;
-    }
+
     // 处理进入文件夹请求
     case ENUM_MSG_TYPE_ENTRY_DIR_REQUEST: {
         // 从PDU的caData字段中获取要进入的文件夹名称

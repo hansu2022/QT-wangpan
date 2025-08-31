@@ -13,10 +13,11 @@ class Book : public QWidget
 public:
     explicit Book(QWidget *parent = nullptr);
     void flushFile(const PDU *pdu);
-    void delDir();
+    void delItem();// 新增一个统一删除的方法
     void reName();
     void entryDir(const QModelIndex &index);
     void returnDir();
+
 signals:
 
 public slots:
@@ -26,12 +27,11 @@ private:
     QListWidget *m_pBookListw;
     QPushButton *m_pReturnPB;
     QPushButton *m_pCreateDirPB;
-    QPushButton *m_pDelDirPB;
+    QPushButton *m_pDelItemPB;  // 新增一个统一的按钮
     QPushButton *m_pRenamePB;
     QPushButton *m_pFlushFilePB;
     QPushButton *m_pUploadPB;
     QPushButton *m_pDownLoadPB;
-    QPushButton *m_pDelFilePB;
     QPushButton *m_pShareFilePB;
 };
 

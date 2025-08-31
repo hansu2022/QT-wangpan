@@ -266,13 +266,13 @@ void TcpClient::recvMsg()
 
         break;
     }
-    // 删除文件夹
-    case ENUM_MSG_TYPE_DEL_DIR_RESPOND:{
-        QMessageBox::information(this,"删除文件夹",pdu->caData);
-        // 主动请求刷新文件列表 主动调用“刷新文件”的槽函数
+
+    case ENUM_MSG_TYPE_DEL_ITEM_RESPOND: { // 监听新的响应协议
+        QMessageBox::information(this, "删除", pdu->caData);
         OpeWidget::getInstance().getBook()->flushFileSlot();
         break;
     }
+
     // 重命名文件夹
     case ENUM_MSG_TYPE_RENAME_DIR_RESPOND:{
         QMessageBox::information(this,"重命名文件夹",pdu->caData);
@@ -280,6 +280,7 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getBook()->flushFileSlot();
         break;
     }
+
     // 单独处理进入文件夹失败的响应
     case ENUM_MSG_TYPE_ENTRY_DIR_RESPOND: {
         // 能进入这个case的，都是进入失败的响应

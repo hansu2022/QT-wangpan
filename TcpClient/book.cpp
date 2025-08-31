@@ -14,7 +14,7 @@ Book::Book(QWidget *parent)
     // 创建各种按钮
     m_pReturnPB = new QPushButton("返回", this);
     m_pCreateDirPB = new QPushButton("新建文件夹", this);
-    m_pDelDirPB = new QPushButton("删除文件夹", this);
+    m_pDelItemPB = new QPushButton("删除", this);
     m_pRenamePB = new QPushButton("重命名", this);
     m_pFlushFilePB = new QPushButton("刷新文件", this);
 
@@ -22,21 +22,19 @@ Book::Book(QWidget *parent)
     QVBoxLayout *pDirVBL = new QVBoxLayout;
     pDirVBL->addWidget(m_pReturnPB);
     pDirVBL->addWidget(m_pCreateDirPB);
-    pDirVBL->addWidget(m_pDelDirPB);
+    pDirVBL->addWidget(m_pDelItemPB);
     pDirVBL->addWidget(m_pRenamePB);
     pDirVBL->addWidget(m_pFlushFilePB);
 
     // 创建文件操作按钮
     m_pUploadPB = new QPushButton("上传", this);
     m_pDownLoadPB = new QPushButton("下载", this);
-    m_pDelFilePB = new QPushButton("删除文件", this);
     m_pShareFilePB = new QPushButton("分享文件", this);
 
     // 创建另一个垂直布局管理器，用于放置文件操作按钮
     QVBoxLayout *pFileVBL = new QVBoxLayout;
     pFileVBL->addWidget(m_pUploadPB);
     pFileVBL->addWidget(m_pDownLoadPB);
-    pFileVBL->addWidget(m_pDelFilePB);
     pFileVBL->addWidget(m_pShareFilePB);
 
     // 创建一个主水平布局管理器，用于将列表和两个按钮布局管理器整合在一起
@@ -51,8 +49,8 @@ Book::Book(QWidget *parent)
 
     // 将刷新文件按钮的 clicked 信号连接到 flushFileSlot 槽函数
     connect(m_pFlushFilePB, &QPushButton::clicked, this, &Book::flushFileSlot);
-    // 将删除文件夹按钮的 clicked 信号连接到 delDir 槽函数
-    connect(m_pDelDirPB, &QPushButton::clicked, this, &Book::delDir);
+    // 将删除按钮的 clicked 信号连接到 delItem 槽函数
+    connect(m_pDelItemPB, &QPushButton::clicked, this, &Book::delItem);
     // 将重命名按钮的 clicked 信号连接到 reName 槽函数
     connect(m_pRenamePB, &QPushButton::clicked, this, &Book::reName);
     // 将文件列表的双击信号连接到 entryDir 槽函数
@@ -150,36 +148,53 @@ void Book::flushFileSlot()
     pdu = NULL;
 }
 
-// 删除文件夹的槽函数
-void Book::delDir()
+// 删除的槽函数
+void Book::delItem()
 {
-    // 获取当前客户端的路径
-    QString strCurPath = TcpClient::getInstance().curPath();
-    // 获取用户在列表视图中当前选中的项目
-    QListWidgetItem *pItem =  m_pBookListw->currentItem();
-    // 如果没有选中任何项目，则弹出警告框并返回
-    if(pItem == NULL){
-        QMessageBox::warning(this,"删除文件夹","请选择要删除的文件夹");
+    QListWidgetItem *pItem = m_pBookListw->currentItem();
+    if (pItem == NULL) {
+        QMessageBox::warning(this, "删除", "请选择要删除的项目");
         return;
     }
-    // 获取要删除的文件夹名称
-    QString strDelName = pItem->text();
-    // 创建一个PDU（协议数据单元）结构体，用于封装请求数据。
-    // PDU的大小根据当前路径的长度动态分配。
-    PDU *pdu = mkPDU(strCurPath.size()+1);
-    // 设置消息类型为“删除文件夹请求”
-    pdu->uiMsgType = ENUM_MSG_TYPE_DEL_DIR_REQUEST;
-    // 将要删除的文件夹名称拷贝到 PDU 的 caData 字段中，最多32字节
-    strncpy(pdu->caData,strDelName.toStdString().c_str(),32);
-    // 确保字符串以空字符结尾，防止越界
-    pdu->caData[31] = '\0';
-    // 将当前路径拷贝到 PDU 的 caMsg 字段中
-    strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
-    // 通过TCP socket发送PDU数据
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-    // 释放动态分配的PDU内存，避免内存泄漏
-    free(pdu);
-    pdu = NULL;
+
+    // 从Item中获取我们之前存储的类型信息
+    int itemType = pItem->data(Qt::UserRole).toInt();
+    QString typeText = (itemType == 0) ? "文件夹" : "文件";
+    QString itemName = pItem->text();
+
+    // 增加删除前的确认对话框，提升用户体验
+    QString question; // 先声明一个空的 question 字符串
+    //使用 if-else 为不同类型生成专属提示**
+    if (itemType == 0) { // 如果是文件夹
+        question = QString("您确定要删除文件夹 “%1” 吗？\n\n<font color='red'>此操作将删除该文件夹下的所有内容，且不可恢复！</font>").arg(itemName);
+    } else { // 如果是文件
+        question = QString("您确定要删除文件 “%1” 吗？\n\n此操作不可恢复。").arg(itemName);
+    }
+
+    // 使用 QMessageBox::question 显示确认对话框
+    QMessageBox msgBox(this);
+    msgBox.setIcon(QMessageBox::Question);
+    msgBox.setWindowTitle("确认删除");
+    msgBox.setTextFormat(Qt::RichText); // 设置文本格式为富文本，让HTML标签生效
+    msgBox.setText(question);
+    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::Cancel);
+    msgBox.setDefaultButton(QMessageBox::Cancel); // 默认选中“取消”
+
+    int ret = msgBox.exec();
+
+    if (ret == QMessageBox::Yes) {
+        // 用户确认后，才发送请求
+        QString strCurPath = TcpClient::getInstance().curPath();
+        PDU *pdu = mkPDU(strCurPath.size() + 1);
+        pdu->uiMsgType = ENUM_MSG_TYPE_DEL_ITEM_REQUEST;
+        strncpy(pdu->caData, itemName.toStdString().c_str(), 32);
+        pdu->caData[31] = '\0';
+        strncpy(pdu->caMsg, strCurPath.toStdString().c_str(), strCurPath.size());
+
+        TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
+        free(pdu);
+        pdu = NULL;
+    }
 }
 
 // 重命名文件夹的槽函数
