@@ -243,8 +243,7 @@ void Book::entryDir(const QModelIndex &index)
     }
     // 获取被双击的文件夹名称
     QString strDirName = item->text();
-    // 将要进入的文件夹名称存储到客户端实例中，以便后续使用（注意这里调用了两次，可能是一个冗余或特定逻辑）
-    TcpClient::getInstance().setEnterDirName(strDirName);
+    // 将要进入的文件夹名称存储到客户端实例中
     TcpClient::getInstance().setEnterDirName(strDirName);
     // 获取当前客户端的路径
     QString strCurPath = TcpClient::getInstance().curPath();
