@@ -51,6 +51,8 @@ Book::Book(QWidget *parent)
 
     // 将刷新文件按钮的 clicked 信号连接到 flushFileSlot 槽函数
     connect(m_pFlushFilePB, &QPushButton::clicked, this, &Book::flushFileSlot);
+    // 将删除文件夹按钮的 clicked 信号连接到 delDir 槽函数
+    connect(m_pDelDirPB, &QPushButton::clicked, this, &Book::delDir);
 }
 
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
@@ -85,6 +87,7 @@ void Book::flushFile(const PDU *pdu)
         m_pBookListw->addItem(pItem);
     }
 }
+
 
 // 新建文件夹的槽函数
 void Book::createDirSlot()
@@ -137,6 +140,25 @@ void Book::flushFileSlot()
     // 通过 TcpClient 发送 PDU
     TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
     // 释放 PDU 内存
+    free(pdu);
+    pdu = NULL;
+}
+
+void Book::delDir()
+{
+    QString strCurPath = TcpClient::getInstance().curPath();
+    QListWidgetItem *pItem =  m_pBookListw->currentItem();
+    if(pItem == NULL){
+        QMessageBox::warning(this,"删除文件夹","请选择要删除的文件夹");
+        return;
+    }
+    QString strDelName = pItem->text();
+    PDU *pdu = mkPDU(strCurPath.size()+1);
+    pdu->uiMsgType = ENUM_MSG_TYPE_DEL_DIR_REQUEST;
+    strncpy(pdu->caData,strDelName.toStdString().c_str(),32);
+    pdu->caData[31] = '\0';
+    strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
+    TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
     free(pdu);
     pdu = NULL;
 }

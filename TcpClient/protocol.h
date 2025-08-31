@@ -61,6 +61,9 @@ enum ENUM_MSG_TYPE
 
     ENUM_MSG_TYPE_FLUSH_FILE_REQUEST, //刷新文件请求
     ENUM_MSG_TYPE_FLUSH_FILE_RESPOND, //刷新文件回复
+
+    ENUM_MSG_TYPE_DEL_DIR_REQUEST, // 删除文件夹请求
+    ENUM_MSG_TYPE_DEL_DIR_RESPOND, // 删除文件夹回复
     ENUM_MSG_TYPE_MAX = 0x00ffffff,
 };
 

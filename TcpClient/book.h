@@ -13,7 +13,7 @@ class Book : public QWidget
 public:
     explicit Book(QWidget *parent = nullptr);
     void flushFile(const PDU *pdu);
-
+    void delDir();
 
 signals:
 

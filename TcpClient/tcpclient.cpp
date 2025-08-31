@@ -240,9 +240,17 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getBook()->flushFile(pdu);
         break;
     }
+    // 删除文件夹
+    case ENUM_MSG_TYPE_DEL_DIR_RESPOND:{
+        QMessageBox::information(this,"删除文件夹",pdu->caData);
+        // 主动请求刷新文件列表 主动调用“刷新文件”的槽函数
+        OpeWidget::getInstance().getBook()->flushFileSlot();
+        break;
+    }
     default:
         break;
     }
+
     free(pdu); // 释放 PDU 内存
     pdu = NULL;
 }
