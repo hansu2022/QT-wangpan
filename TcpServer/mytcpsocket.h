@@ -16,6 +16,7 @@ signals:
 public slots:
     void recvMsg();
     void clientOffline();
+    void sendFileToClient();
 private:
     QString m_strName;
 
@@ -23,6 +24,7 @@ private:
     qint64 m_iTotal;
     qint64 m_iRecved;
     bool m_bUpload;
+    QTimer *m_pTimer;
 };
 
 #endif // MYTCPSOCKET_H

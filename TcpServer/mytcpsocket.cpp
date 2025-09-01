@@ -1,7 +1,7 @@
 #include "mytcpsocket.h" // 包含自定义的头文件，通常包含 MyTcpSocket 类的声明
 #include "mytcpserver.h" // 包含 MyTcpServer 类的头文件，用于服务器的转发逻辑
 #include <QDebug>        // 提供 qDebug() 函数，用于调试输出
-
+#include <QTimer>
 // MyTcpSocket 类的构造函数
 MyTcpSocket::MyTcpSocket()
 {
@@ -11,6 +11,8 @@ MyTcpSocket::MyTcpSocket()
     connect(this,SIGNAL(disconnected()),this,SLOT(clientOffline()));
 
     m_bUpload = false; // 初始化上传状态为 false
+    m_pTimer = new QTimer(this); // 创建一个新的定时器对象
+    connect(m_pTimer, SIGNAL(timeout()), this, SLOT(sendFileToClient())); // 连接定时器的超时信号到发送文件槽函数
 }
 
 // 获取当前客户端的用户名
@@ -553,6 +555,7 @@ void MyTcpSocket::recvMsg()
             pPath = NULL;
             break;
         }
+        // 处理上传文件请求
         case ENUM_MSG_TYPE_UPLOAD_FILE_REQUEST:{
             char caFileName[32] = {'\0'};
             qint64 fileSize = 0;
@@ -586,6 +589,40 @@ void MyTcpSocket::recvMsg()
                 free(respdu);
                 respdu = NULL;
             }
+            break;
+        }
+
+        // 处理下载文件请求
+        case ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST:{
+            char caFileName[32] = {'\0'};
+            strncpy(caFileName,pdu->caData,32);
+            char *pPath = new char[pdu->uiMsgLen];
+            strncpy(pPath,pdu->caMsg,pdu->uiMsgLen);
+            pPath[pdu->uiMsgLen-1] = '\0';
+            QString strPath = QString("%1/%2").arg(pPath).arg(caFileName);
+            delete[] pPath;
+            pPath = NULL;
+
+            QFileInfo fileInfo(strPath);
+            qint64 fileSize = fileInfo.size();
+
+            // 1. 先回复客户端，告知文件名和大小
+            PDU *respdu = mkPDU(0);
+            respdu->uiMsgType = ENUM_MSG_TYPE_DOWNLOAD_FILE_RESPOND; // <-- 发送这个响应
+            sprintf(respdu->caData, "%s#%lld", caFileName, fileSize);
+            write((char*)respdu, respdu->uiPDULen);
+            free(respdu);
+            respdu = NULL;
+
+            // 2. 准备发送文件
+            m_file.setFileName(strPath);
+            if (!m_file.open(QIODevice::ReadOnly)) {
+                qDebug() << "打开文件失败：" << strPath;
+                break; // 文件打不开就不用发送了
+            }
+
+            // 3. 启动定时器，开始发送文件
+            m_pTimer->start(1); // 立即开始，尽可能快地发送
             break;
         }
         default:
@@ -622,6 +659,7 @@ void MyTcpSocket::recvMsg()
             write((char*)respdu, respdu->uiPDULen);
             free(respdu);
             respdu = NULL;
+
         }
     }
 }
@@ -633,4 +671,35 @@ void MyTcpSocket::clientOffline()
     OpeDB::getInstance().handleOffline(m_strName.toStdString().c_str());
     // 发射 offline 信号，通知 MyTcpServer 该客户端已下线
     emit offline(this);
+}
+
+void MyTcpSocket::sendFileToClient()
+{
+    char *pData = new char[4096]; // 每次发送4KB
+    qint64 ret = 0;
+    while(true) {
+        ret = m_file.read(pData, 4096);
+        if (ret > 0) {
+            // 成功读取数据，写入socket
+            if (this->write(pData, ret) == -1) {
+                // 如果写入失败（例如客户端断开），则停止发送
+                qDebug() << "发送文件数据失败";
+                m_pTimer->stop();
+                break;
+            }
+        } else if (ret == 0) {
+            // 文件已读完
+            m_pTimer->stop(); // 停止定时器
+            m_file.close();   // 关闭文件
+            break;
+        } else {
+            // 读取出错
+            qDebug() << "读取文件时出错";
+            m_pTimer->stop();
+            m_file.close();
+            break;
+        }
+    }
+    delete[] pData;
+    pData = NULL;
 }

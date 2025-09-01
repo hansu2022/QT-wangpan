@@ -5,11 +5,14 @@
 #include <QListWidgetItem> // 包含 QListWidgetItem，用于列表项
 #include "protocol.h" // 包含 protocol 头文件，定义了协议数据单元 PDU
 #include <QFileDialog> // 包含 QFileDialog，用于文件选择对话框
-
+#include <QStandardPaths> // 新增这个头文件，用于获取标准路径
 // Book 类的构造函数
 Book::Book(QWidget *parent)
     : QWidget{parent}
 {
+    m_bDownload = false;
+    m_iRecved = 0;
+    m_iTotal = 0;
     // 创建一个 QListWidget 控件，用于显示文件和文件夹列表
     m_pBookListw = new QListWidget(this);
     // 创建各种按钮
@@ -62,6 +65,8 @@ Book::Book(QWidget *parent)
     connect(m_pUploadPB, &QPushButton::clicked, this, &Book::uploadFile);
     // 将上传文件数据的槽函数连接到定时器的 timeout 信号
     connect(&m_pTimer, &QTimer::timeout, this, &Book::uploadFileData);
+    // 将下载按钮的 clicked 信号连接到 downloadFile 槽函数
+    connect(m_pDownLoadPB, &QPushButton::clicked, this, &Book::downloadFile);
 }
 
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
@@ -92,6 +97,8 @@ void Book::flushFile(const PDU *pdu)
         }
         // 设置列表项的显示文本为文件名
         pItem->setText(strFileName);
+        // <-- 新增：将文件类型，存储到Item的UserRole中
+        pItem->setData(Qt::UserRole, pFileInfo->iFileType);
         // 将列表项添加到 QListWidget 中
         m_pBookListw->addItem(pItem);
     }
@@ -363,3 +370,69 @@ void Book::uploadFileData()
     delete[] caBuf;
     caBuf = NULL;
 }
+
+void Book::downloadFile()
+{
+    QListWidgetItem *pItem = m_pBookListw->currentItem();
+    if (pItem == NULL) {
+        QMessageBox::warning(this, "下载", "请选择要下载的文件");
+        qDebug() << "警告: 未选中任何项，下载操作中止。";
+        return;
+    }
+
+    // 从Item中获取我们之前存储的类型信息
+    int itemType = pItem->data(Qt::UserRole).toInt();
+
+
+    if (itemType != 1) { // 1 代表文件
+        QMessageBox::warning(this, "下载", "只能下载文件，不能下载文件夹");
+        return;
+    }
+
+    // 1. 先从列表项获取要下载的文件名
+    QString fileName = pItem->text();
+
+    // 2. 获取系统的标准“下载”文件夹路径
+    QString defaultPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+
+    // 3. 将路径和文件名拼接成一个完整的建议路径
+    QString fullDefaultPath = defaultPath + "/" + fileName;
+
+    // 4. 将这个建议路径作为第三个参数传入文件对话框
+    QString strSaveFilePath = QFileDialog::getSaveFileName(this, "保存文件", fullDefaultPath);
+
+    // 弹窗让用户选择保存位置，如果用户取消则中止,不继续下载
+    if (strSaveFilePath.isEmpty()) {
+        return;
+    }
+
+    m_strSaveFilePath = strSaveFilePath; // <-- 使用新的成员变量保存路径
+
+    QString strCurPath = TcpClient::getInstance().curPath();
+
+    PDU *pdu = mkPDU(strCurPath.size() + 1);
+    pdu->uiMsgType = ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST;
+    strncpy(pdu->caData, fileName.toStdString().c_str(), 32);
+    strncpy(pdu->caMsg, strCurPath.toStdString().c_str(), strCurPath.size());
+
+    TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
+    free(pdu);
+    pdu = NULL;
+
+}
+
+void Book::setDownloadStatus(bool status)
+{
+    m_bDownload = status;
+}
+
+bool Book::getDownloadStatus()
+{
+    return m_bDownload;
+}
+
+QString Book::getSaveFilePath()
+{
+    return m_strSaveFilePath;
+}
+

@@ -96,6 +96,7 @@ void TcpClient::showConnect()
 // 槽函数：处理接收到的数据
 void TcpClient::recvMsg()
 {
+    if(!OpeWidget::getInstance().getBook()->getDownloadStatus()){
     qDebug() << m_tcpSocket.bytesAvailable(); // 调试输出可读字节数
     uint uiPDULen = 0;
     // 先读取数据包的总长度
@@ -300,13 +301,48 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getBook()->uploadFileData();
         break;
     }
+    case ENUM_MSG_TYPE_DOWNLOAD_FILE_RESPOND:{
+        char caFileName[32] = {'\0'};
+        // 从响应中解析出文件名和总大小
+                Book *pBook = OpeWidget::getInstance().getBook();
+        sscanf(pdu->caData, "%[^#]#%lld", caFileName, &(pBook->m_iTotal));
 
+        if (strlen(caFileName) > 0 && pBook->m_iTotal > 0) {
+            pBook->setDownloadStatus(true); // <-- 在这里才设置下载状态
+            m_file.setFileName(pBook->getSaveFilePath());
+            if (!m_file.open(QIODevice::WriteOnly)) {
+                QMessageBox::warning(this, "下载文件", "本地文件创建失败，请检查路径或权限");
+            }
+        } else {
+            // 服务器回复了一个无效的响应或文件大小为0
+            QMessageBox::warning(this, "下载文件", "服务器响应错误或文件为空");
+        }
+        break;
+    }
     default:
         break;
     }
 
     free(pdu); // 释放 PDU 内存
     pdu = NULL;
+    }else{
+        // 读取剩余的（或新到达的）所有数据，它们都应该是文件数据
+        QByteArray buffer = m_tcpSocket.readAll();
+        Book *pBook = OpeWidget::getInstance().getBook();
+        m_file.write(buffer);
+        pBook->m_iRecved += buffer.size();
+
+        // 检查是否下载完成
+        if (pBook->m_iRecved >= pBook->m_iTotal) {
+            m_file.close();
+            // 重置状态
+            pBook->m_iRecved = 0;
+            pBook->m_iTotal = 0;
+            pBook->setDownloadStatus(false);
+            QMessageBox::information(this, "下载文件", "文件下载成功！");
+            OpeWidget::getInstance().getBook()->flushFileSlot(); // 下载完成后刷新文件列表
+        }
+    }
 }
 
 

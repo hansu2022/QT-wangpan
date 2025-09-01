@@ -21,6 +21,12 @@ public:
     void returnDir();
     void uploadFile();
     void uploadFileData();
+    void downloadFile();
+    void setDownloadStatus(bool status);
+    bool getDownloadStatus();
+    QString getSaveFilePath();
+    qint64 m_iTotal;
+    qint64 m_iRecved;
 signals:
 
 public slots:
@@ -38,7 +44,9 @@ private:
     QPushButton *m_pShareFilePB;
 
     QString m_strUploadFilePath;
+    QString m_strSaveFilePath;   //用于下载保存路径
     QTimer m_pTimer;
+    bool m_bDownload;
 };
 
 #endif // BOOK_H

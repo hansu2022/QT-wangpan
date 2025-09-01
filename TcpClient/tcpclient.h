@@ -49,5 +49,7 @@ private:
     // 当前路径
     QString m_strCurPath;
     QString m_strEnterDirName; // 进入的文件夹名称
+
+    QFile m_file;
 };
 #endif // TCPCLIENT_H
