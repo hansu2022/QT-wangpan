@@ -18,6 +18,11 @@ public slots:
     void clientOffline();
 private:
     QString m_strName;
+
+    QFile m_file;
+    qint64 m_iTotal;
+    qint64 m_iRecved;
+    bool m_bUpload;
 };
 
 #endif // MYTCPSOCKET_H

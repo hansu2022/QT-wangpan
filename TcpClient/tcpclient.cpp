@@ -287,6 +287,20 @@ void TcpClient::recvMsg()
         QMessageBox::warning(this, "进入文件夹", pdu->caData);
         break;
     }
+    // 上传文件响应
+    case ENUM_MSG_TYPE_UPLOAD_FILE_RESPOND:{
+        QMessageBox::information(this,"上传文件",pdu->caData);
+        // 主动请求刷新文件列表 主动调用“刷新文件”的槽函数
+        OpeWidget::getInstance().getBook()->flushFileSlot();
+        break;
+    }
+    // 服务器准备好接收文件数据的响应
+    case ENUM_MSG_TYPE_UPLOAD_FILE_READY_RESPOND: {
+        // 服务器已准备好，现在开始上传文件数据
+        OpeWidget::getInstance().getBook()->uploadFileData();
+        break;
+    }
+
     default:
         break;
     }

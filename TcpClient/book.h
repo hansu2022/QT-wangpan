@@ -7,6 +7,8 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include "protocol.h"
+#include <QTimer>
+
 class Book : public QWidget
 {
     Q_OBJECT
@@ -17,7 +19,8 @@ public:
     void reName();
     void entryDir(const QModelIndex &index);
     void returnDir();
-
+    void uploadFile();
+    void uploadFileData();
 signals:
 
 public slots:
@@ -33,6 +36,9 @@ private:
     QPushButton *m_pUploadPB;
     QPushButton *m_pDownLoadPB;
     QPushButton *m_pShareFilePB;
+
+    QString m_strUploadFilePath;
+    QTimer m_pTimer;
 };
 
 #endif // BOOK_H
