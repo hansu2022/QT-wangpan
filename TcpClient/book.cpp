@@ -26,6 +26,10 @@ Book::Book(QWidget *parent)
     m_pDelItemPB = new QPushButton("删除", this);
     m_pRenamePB = new QPushButton("重命名", this);
     m_pFlushFilePB = new QPushButton("刷新文件", this);
+    m_pMoveFilePB = new QPushButton("移动文件", this);
+    m_pSelectDirPB = new QPushButton("目标目录", this);
+    m_pSelectDirPB->setEnabled(false); // 初始状态下禁用目标目录按钮
+
 
     // 创建一个垂直布局管理器，用于放置文件夹操作按钮
     QVBoxLayout *pDirVBL = new QVBoxLayout;
@@ -34,7 +38,8 @@ Book::Book(QWidget *parent)
     pDirVBL->addWidget(m_pDelItemPB);
     pDirVBL->addWidget(m_pRenamePB);
     pDirVBL->addWidget(m_pFlushFilePB);
-
+    pDirVBL->addWidget(m_pMoveFilePB);
+    pDirVBL->addWidget(m_pSelectDirPB);
     // 创建文件操作按钮
     m_pUploadPB = new QPushButton("上传", this);
     m_pDownLoadPB = new QPushButton("下载", this);
@@ -74,6 +79,10 @@ Book::Book(QWidget *parent)
     connect(m_pDownLoadPB, &QPushButton::clicked, this, &Book::downloadFile);
     // 将分享文件按钮的 clicked 信号连接到 shareFile 槽函数
     connect(m_pShareFilePB, &QPushButton::clicked, this, &Book::shareFile);
+    // 将移动文件按钮的 clicked 信号连接到 moveFile 槽函数
+    connect(m_pMoveFilePB, &QPushButton::clicked, this, &Book::moveFile);
+    // 将目标目录按钮的 clicked 信号连接到 selectDir 槽函数
+    connect(m_pSelectDirPB, &QPushButton::clicked, this, &Book::selectDir);
 }
 
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
@@ -453,6 +462,66 @@ void Book::shareFile()
     // flushFriend() 是一个函数，它会发送一个请求，告诉服务器刷新好友列表。
     // 刷新过程是异步的，当好友列表更新完毕后，会发送一个信号。
     OpeWidget::getInstance().getFriend()->flushFriend();
+}
+
+void Book::moveFile()
+{
+    QListWidgetItem *pItem = m_pBookListw->currentItem();
+    if (pItem == NULL) {
+        QMessageBox::warning(this, "移动文件", "请选择要移动的文件");
+        return;
+    }
+
+    m_strMoveFileName = pItem->text();
+    QString strCurPath = TcpClient::getInstance().curPath();
+    m_strMoveFilePath = strCurPath + '/' + m_strMoveFileName;
+    m_pSelectDirPB->setEnabled(true); // 启用目标目录按钮
+
+
+}
+
+void Book::selectDir()
+{
+    QListWidgetItem *pItem = m_pBookListw->currentItem();
+    if (pItem == NULL) {
+        // 虽然此时按钮是启用的，但用户可能在启用后取消了选择，所以这个检查仍然需要
+        m_pSelectDirPB->setEnabled(false); // 恢复按钮禁用状态
+        return;
+    }
+    int itemType = pItem->data(Qt::UserRole).toInt();
+    if (itemType != 0) { // 0 代表文件夹
+        QMessageBox::warning(this, "选择目标", "请选择一个文件夹作为目标目录！");
+        return;
+    }
+
+
+
+    QString strDestDir = pItem->text();
+    QString strCurPath = TcpClient::getInstance().curPath();
+    m_strDestDirPath = strCurPath + '/' + strDestDir;
+
+    if (m_strMoveFilePath == m_strDestDirPath) {
+        QMessageBox::warning(this, "移动文件", "不能将文件夹移动到其自身内部！");
+        return;
+    }
+
+    int srcLen = m_strMoveFilePath.size();
+    int destLen = m_strDestDirPath.size();
+    PDU *pdu = mkPDU(srcLen + destLen + 2); // 两个路径 + 两个'\0'
+    pdu->uiMsgType = ENUM_MSG_TYPE_MOVE_FILE_REQUEST;
+
+    // 将源路径和目标路径先后拷贝到 caMsg 中，用'\0'分隔
+    memcpy(pdu->caMsg, m_strMoveFilePath.toStdString().c_str(), srcLen);
+    pdu->caMsg[srcLen] = '\0';
+    memcpy(pdu->caMsg + srcLen + 1, m_strDestDirPath.toStdString().c_str(), destLen);
+    pdu->caMsg[srcLen + 1 + destLen] = '\0';
+
+    TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
+    free(pdu);
+    pdu = NULL;
+
+    m_pSelectDirPB->setEnabled(false);
+
 }
 
 // 当好友列表更新信号传来时，此槽函数被调用。

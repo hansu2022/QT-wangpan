@@ -360,6 +360,11 @@ void TcpClient::recvMsg()
         OpeWidget::getInstance().getBook()->flushFileSlot();
         break;
     }
+    case ENUM_MSG_TYPE_MOVE_FILE_RESPOND:{
+        QMessageBox::information(this,"移动文件",pdu->caData);
+        OpeWidget::getInstance().getBook()->flushFileSlot();
+        break;
+    }
     default:
         break;
     }

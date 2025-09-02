@@ -756,6 +756,40 @@ void MyTcpSocket::recvMsg()
             free(respdu);
             break;
         }
+        case ENUM_MSG_TYPE_MOVE_FILE_REQUEST:{
+            // 1. 从 caMsg 解析源路径和目标路径
+            char* pSrcPath_relative = pdu->caMsg;
+            int srcLen = strlen(pSrcPath_relative);
+            char* pDestPath_relative = pdu->caMsg + srcLen + 1;
+
+            // 2. 客户端发来的已经是我们需要的完整相对路径，直接使用
+            // m_strName 是当前socket关联的用户名
+            QString strSrcPath_server = QString(pSrcPath_relative);
+            QString strDestPath_server = QString(pDestPath_relative);
+
+            // 3. 从源路径中提取文件名/文件夹名
+            QFileInfo srcFileInfo(strSrcPath_server);
+            QString strFileName = srcFileInfo.fileName();
+
+            // 4. 构建最终的目标路径 (目标文件夹 + 源文件名)
+            QString strFinalDestPath_server = strDestPath_server + "/" + strFileName;
+
+            // 5. 执行移动操作
+            bool ret = QFile::rename(strSrcPath_server, strFinalDestPath_server);
+
+            // 6. 回复客户端
+            PDU *respdu = mkPDU(0);
+            respdu->uiMsgType = ENUM_MSG_TYPE_MOVE_FILE_RESPOND;
+            if (ret) {
+                strcpy(respdu->caData, "移动成功");
+            } else {
+                strcpy(respdu->caData, "移动失败：请检查路径或权限");
+            }
+            write((char*)respdu, respdu->uiPDULen);
+            free(respdu);
+            respdu = NULL;
+            break;
+        }
         default:
             break;
         }
