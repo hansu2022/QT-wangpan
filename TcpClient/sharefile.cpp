@@ -192,5 +192,5 @@ void ShareFile::okBtnClicked()
 
 void ShareFile::cancelBtnClicked()
 {
-
+    this->hide(); // 关闭分享窗口
 }

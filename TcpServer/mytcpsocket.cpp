@@ -21,6 +21,27 @@ QString MyTcpSocket::getName()
     return m_strName;
 }
 
+void MyTcpSocket::copyDir(QString srcDir, QString destDir)
+{
+    QDir dest_dir(destDir);
+    if (dest_dir.exists()) {
+        //目标文件夹已存在
+        //将新文件夹重命名，例如 "docs_1"
+        destDir = destDir + "_1";
+    }
+    QDir dir;
+    dir.mkdir(destDir);
+    dir.setPath(srcDir);
+    QFileInfoList fileInfoList = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    foreach (QFileInfo fileInfo, fileInfoList) {
+        if (fileInfo.isDir()) {
+            copyDir(fileInfo.filePath(), destDir + "/" + fileInfo.fileName());
+        } else {
+            QFile::copy(fileInfo.filePath(), destDir + "/" + fileInfo.fileName());
+        }
+    }
+}
+
 // 槽函数：处理接收到的数据
 void MyTcpSocket::recvMsg()
 {
@@ -716,11 +737,23 @@ void MyTcpSocket::recvMsg()
             QString strFullSourcePath = QString("./%1").arg(strShareFilePath);
 
             QFileInfo fileInfo(strFullSourcePath);
+            bool success = false;  // 用于标记操作是否成功
             if (fileInfo.exists() && fileInfo.isFile()) {
-                QFile::copy(strFullSourcePath, strRecvPath);
+               success = QFile::copy(strFullSourcePath, strRecvPath);
             } else if (fileInfo.isDir()) {
-                // 目录分享的逻辑暂未实现
+                copyDir(strFullSourcePath,strRecvPath);
+                success = true;
             }
+            // 向接收文件的客户端发送操作结果
+            PDU* respdu = mkPDU(0);
+            respdu->uiMsgType = ENUM_MSG_TYPE_RECEIVE_FILE_RESULT;
+            if(success){
+                strcpy(respdu->caData,"文件接收成功");
+            }else{
+                strcpy(respdu->caData,"文件接收失败");
+            }
+            MyTcpServer::getInstance().resend(pdu->caData,respdu);
+            free(respdu);
             break;
         }
         default:

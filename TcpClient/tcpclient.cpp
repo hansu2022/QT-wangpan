@@ -353,6 +353,13 @@ void TcpClient::recvMsg()
         QMessageBox::information(this,"文件分享",pdu->caData);
         break;
     }
+    //
+    case ENUM_MSG_TYPE_RECEIVE_FILE_RESULT:{
+        QMessageBox::information(this,"文件接收",pdu->caData);
+
+        OpeWidget::getInstance().getBook()->flushFileSlot();
+        break;
+    }
     default:
         break;
     }
