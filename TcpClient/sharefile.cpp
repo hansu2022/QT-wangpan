@@ -187,10 +187,7 @@ void ShareFile::okBtnClicked()
     TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
     free(pdu);
     pdu = NULL;
-
-    // 提示用户分享请求已发送
-    QMessageBox::information(this, "分享文件", "分享请求已发送！");
-    this->close(); // 发送成功后可以关闭窗口
+    this->hide(); // 关闭分享窗口
 }
 
 void ShareFile::cancelBtnClicked()

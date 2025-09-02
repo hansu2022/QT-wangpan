@@ -654,6 +654,75 @@ void MyTcpSocket::recvMsg()
             m_pTimer->start(1); // 立即开始，尽可能快地发送
             break;
         }
+        // 处理分享文件请求
+        case ENUM_MSG_TYPE_SHARE_FILE_REQUEST:{
+            char caSharerName[32] = {'\0'};
+            strncpy(caSharerName, pdu->caData, 32); // 分享者名字在 caData
+
+            // 从 caMsg 中分离文件路径和好友列表
+            char* pFilePathEnd = (char*)memchr(pdu->caMsg, '\0', pdu->uiMsgLen);
+            if (!pFilePathEnd) {
+                // 格式错误，找不到路径结束符
+                break;
+            }
+            int filePathLen = pFilePathEnd - pdu->caMsg;
+            QString strFilePath = QString::fromUtf8(pdu->caMsg, filePathLen);
+
+            // 好友列表在文件路径之后
+            char* pFriendList = pFilePathEnd + 1;
+            int friendListLen = pdu->uiMsgLen - filePathLen - 1;
+            int friendCount = friendListLen / 32;
+
+            // 为每个好友转发分享通知,精确计算转发PDU所需大小：仅包含文件路径的长度 + 1个'\0'
+            PDU* noticePdu = mkPDU(filePathLen + 1);
+            noticePdu->uiMsgType = ENUM_MSG_TYPE_SHARE_FILE_NOTICE;
+            // 在通知的caData中放入分享者的名字
+            strncpy(noticePdu->caData, caSharerName, 32);
+            // 在通知的caMsg中放入文件路径
+            strncpy(noticePdu->caMsg,pdu->caMsg,filePathLen+1);
+
+            for(int i = 0;i<friendCount;i++){
+                char caFriendName[32] = {'\0'};
+                strncpy(caFriendName,pFriendList+i*32,32);
+                MyTcpServer::getInstance().resend(caFriendName,noticePdu);
+            }
+            free(noticePdu);
+
+            PDU* resPdu = mkPDU(0);
+            resPdu->uiMsgType = ENUM_MSG_TYPE_SHARE_FILE_RESPOND;
+            strcpy(resPdu->caData,"文件分享请求已发送给好友");
+            write((char*)resPdu,resPdu->uiPDULen);
+            free(resPdu);
+            resPdu = NULL;
+            break;
+
+        }
+        case ENUM_MSG_TYPE_SHARE_FILE_NOTICE_RESPOND:{
+            // pdu->caData 存放的是接收者的名字
+            // pdu->caMsg 存放的是原始文件的完整路径 (例如 "sharer_name/path/to/file.txt")
+
+            // 构造目标路径：./接收者名字/文件名
+            QString strRecvPath = QString("./%1").arg(pdu->caData); // 例如 ./receiver_name
+            QString strShareFilePath = QString(pdu->caMsg); // 例如 sharer_name/path/to/file.txt
+
+            // 从完整路径中提取文件名
+            int index = strShareFilePath.lastIndexOf('/');
+            QString strFileName = strShareFilePath.mid(index + 1);
+
+            // 拼接成最终的目标文件路径
+            strRecvPath = strRecvPath + '/' + strFileName;
+
+            // 构造源文件路径
+            QString strFullSourcePath = QString("./%1").arg(strShareFilePath);
+
+            QFileInfo fileInfo(strFullSourcePath);
+            if (fileInfo.exists() && fileInfo.isFile()) {
+                QFile::copy(strFullSourcePath, strRecvPath);
+            } else if (fileInfo.isDir()) {
+                // 目录分享的逻辑暂未实现
+            }
+            break;
+        }
         default:
             break;
         }

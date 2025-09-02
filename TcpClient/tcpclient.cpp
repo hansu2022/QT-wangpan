@@ -319,6 +319,40 @@ void TcpClient::recvMsg()
         }
         break;
     }
+    case ENUM_MSG_TYPE_SHARE_FILE_NOTICE:{
+        // 从 pdu->caData 中获取分享者名字
+        char caSharerName[32] = {'\0'};
+        strncpy(caSharerName, pdu->caData, 32);
+
+        // 从 pdu->caMsg 中获取文件路径
+        char caFilePath[pdu->uiMsgLen];
+        strncpy(caFilePath, pdu->caMsg, pdu->uiMsgLen);
+
+        // 转换为 QString 类型
+        QString sharerName = QString(caSharerName);
+        QString filePath = QString(caFilePath);
+
+        // 弹出消息框，询问用户是否接受分享的文件
+        QString strMessage = QString("%1 分享了文件给你：%2\n是否接受？").arg(sharerName).arg(filePath);
+        int ret = QMessageBox::question(this, "文件分享通知", strMessage, QMessageBox::Yes, QMessageBox::No);
+
+        if(ret == QMessageBox::Yes){
+            // 同意接收，向服务器发送 SHARE_FILE_NOTICE_RESPOND
+            PDU *resPdu = mkPDU(pdu->uiMsgLen);
+            resPdu->uiMsgType = ENUM_MSG_TYPE_SHARE_FILE_NOTICE_RESPOND;
+            // 在 caMsg 中回传要接收的文件路径
+            strncpy(resPdu->caMsg, caFilePath, pdu->uiMsgLen);
+            // 在 caData 中放入自己的名字，告诉服务器要把文件复制到谁的目录下
+            strncpy(resPdu->caData, TcpClient::getInstance().getLoginName().toStdString().c_str(), 32);
+            m_tcpSocket.write((char*)resPdu, resPdu->uiPDULen);
+            free(resPdu);
+        }
+        break;
+    }
+    case ENUM_MSG_TYPE_SHARE_FILE_RESPOND:{
+        QMessageBox::information(this,"文件分享",pdu->caData);
+        break;
+    }
     default:
         break;
     }
