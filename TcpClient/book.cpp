@@ -468,6 +468,13 @@ void Book::handleFriendListUpdated()
     // 重置状态，表示分享流程已进入处理阶段，后续的刷新不会再触发此逻辑。
     m_bInSharingProcess = false;
 
+    QListWidgetItem *pCurItem = m_pBookListw->currentItem();
+    if (pCurItem == NULL) {
+        QMessageBox::warning(this, "分享文件", "请选择要分享的文件");
+        return;
+    }
+    m_strShareFileName = pCurItem->text();
+
     // 获取好友列表的控件指针
     Friend *pFriend = OpeWidget::getInstance().getFriend();
     QListWidget *pFriendList = pFriend->getFriendList();
@@ -492,5 +499,10 @@ void Book::handleFriendListUpdated()
 QString Book::getSaveFilePath()
 {
     return m_strSaveFilePath;
+}
+
+QString Book::getShareFileName()
+{
+    return m_strShareFileName;
 }
 

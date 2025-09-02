@@ -6,7 +6,9 @@
 #include <QScrollArea>
 #include <QButtonGroup>
 #include <QListWidget>
-
+#include <QMessageBox>
+#include "tcpclient.h"
+#include "opewidget.h"
 // ShareFile 类的构造函数
 ShareFile::ShareFile(QWidget *parent)
     : QWidget{parent}
@@ -53,6 +55,14 @@ ShareFile::ShareFile(QWidget *parent)
     pMainVL->addLayout(pDownHBL);
     // 将主布局设置给当前的ShareFile窗口
     setLayout(pMainVL);
+
+    connect(m_pCancelSelectPB, &QPushButton::clicked, this, &ShareFile::cancelSelect);
+
+    connect(m_pSelectAllPB, &QPushButton::clicked, this, &ShareFile::selectAll);
+
+    connect(m_pOKPB, &QPushButton::clicked, this, &ShareFile::okBtnClicked);
+
+    connect(m_pCancelPB, &QPushButton::clicked, this, &ShareFile::cancelBtnClicked);
 }
 
 // 获取 ShareFile 单例对象的静态函数
@@ -102,4 +112,88 @@ void ShareFile::updateFriend(QListWidget *pFriendList)
     }
     // 重新设置布局，确保所有新添加的控件都正确显示
     m_pFriendW->setLayout(m_pFriendWVBL);
+}
+
+void ShareFile::cancelSelect()
+{
+    // 获取按钮组中所有的复选框
+    QList<QAbstractButton*>preFriendList = m_pButtonGroup->buttons();
+    // 遍历并取消所有复选框的选中状态
+    for(int i = 0;i<preFriendList.size();i++){
+        preFriendList[i]->setChecked(false); // 取消选中
+    }
+}
+
+void ShareFile::selectAll()
+{
+    // 获取按钮组中所有的复选框
+    QList<QAbstractButton*>preFriendList = m_pButtonGroup->buttons();
+    // 遍历并选中所有可用的复选框
+    for(int i = 0;i<preFriendList.size();i++){
+        if(preFriendList[i]->isEnabled()){
+            preFriendList[i]->setChecked(true); // 选中复选框
+        }
+    }
+}
+
+void ShareFile::okBtnClicked()
+{
+    // 1. 收集所有被选中的、可用的好友名字
+    QStringList selectedFriends;
+    QList<QAbstractButton*> allButtons = m_pButtonGroup->buttons();
+
+    for(QAbstractButton* button : allButtons) {
+        if(button->isChecked() && button->isEnabled()) { // <-- 使用 isChecked() 并且检查是否可用
+            QString fullText = button->text();
+            int pos = fullText.indexOf('(');
+            QString friendName = (pos != -1) ? fullText.left(pos) : fullText;
+            selectedFriends.append(friendName);
+        }
+    }
+
+    // 2. 检查是否至少选择了一个好友
+    if (selectedFriends.isEmpty()) {
+        QMessageBox::warning(this, "分享文件", "请至少选择一个在线好友进行分享");
+        return;
+    }
+
+
+    // 3. 准备发送的数据
+    QString strMyName = TcpClient::getInstance().getLoginName();
+    QString strCurPath = TcpClient::getInstance().curPath();
+    QString strShareFileName = OpeWidget::getInstance().getBook()->getShareFileName();
+    QString strFullPath = strCurPath + "/" + strShareFileName;
+
+    // 4. 构建PDU (Protocol Data Unit)
+    // PDU消息部分大小 = 完整路径长度 + 1个'\0' + 好友数量 * 32字节
+    uint uiMsgLen = strFullPath.size() + 1 + selectedFriends.size() * 32;
+    PDU *pdu = mkPDU(uiMsgLen);
+    pdu->uiMsgType = ENUM_MSG_TYPE_SHARE_FILE_REQUEST;
+
+    // 填充自己的名字到caData
+    strncpy(pdu->caData, strMyName.toStdString().c_str(), 32);
+    pdu->caData[31] = '\0'; // 确保字符串结束
+
+    // 填充文件路径到caMsg的开头
+    strncpy(pdu->caMsg, strFullPath.toStdString().c_str(), strFullPath.size());
+
+    // 填充好友列表到caMsg的后续部分
+    char* pFriendListStart = pdu->caMsg + strFullPath.size() + 1;
+    for (int i = 0; i < selectedFriends.size(); ++i) {
+        strncpy(pFriendListStart + i * 32, selectedFriends.at(i).toStdString().c_str(), 32);
+    }
+
+    // 5. 发送数据
+    TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
+    free(pdu);
+    pdu = NULL;
+
+    // 提示用户分享请求已发送
+    QMessageBox::information(this, "分享文件", "分享请求已发送！");
+    this->close(); // 发送成功后可以关闭窗口
+}
+
+void ShareFile::cancelBtnClicked()
+{
+
 }

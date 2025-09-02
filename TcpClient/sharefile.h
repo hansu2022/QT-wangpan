@@ -22,6 +22,10 @@ public:
 signals:
 
 public slots:
+    void cancelSelect();
+    void selectAll();
+    void okBtnClicked();
+    void cancelBtnClicked();
 
 private:
     QPushButton *m_pSelectAllPB;

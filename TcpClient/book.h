@@ -28,6 +28,7 @@ public:
     QString getSaveFilePath();
     qint64 m_iTotal;
     qint64 m_iRecved;
+    QString getShareFileName();
 signals:
 
 public slots:
@@ -52,6 +53,8 @@ private:
     bool m_bDownload;
 
     bool m_bInSharingProcess; // 标志是否处于分享文件过程
+
+    QString m_strShareFileName; // 用于存储要分享的文件名
 };
 
 #endif // BOOK_H
