@@ -24,6 +24,7 @@ public:
     void downloadFile();
     void setDownloadStatus(bool status);
     bool getDownloadStatus();
+    void shareFile();
     QString getSaveFilePath();
     qint64 m_iTotal;
     qint64 m_iRecved;
@@ -32,7 +33,9 @@ signals:
 public slots:
     void createDirSlot();
     void flushFileSlot();
+    void handleFriendListUpdated(); // 处理好友列表更新的槽函数
 private:
+
     QListWidget *m_pBookListw;
     QPushButton *m_pReturnPB;
     QPushButton *m_pCreateDirPB;
@@ -47,6 +50,8 @@ private:
     QString m_strSaveFilePath;   //用于下载保存路径
     QTimer m_pTimer;
     bool m_bDownload;
+
+    bool m_bInSharingProcess; // 标志是否处于分享文件过程
 };
 
 #endif // BOOK_H

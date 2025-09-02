@@ -100,6 +100,12 @@ void Friend::showAllFriend(PDU *pdu)
         memcpy(caTmp,(char*)(pdu->caMsg)+i*32,32);
         m_pFriendListWidget->addItem(caTmp);
     }
+    emit friendListUpdated(); // 发出好友列表更新信号
+}
+
+QListWidget *Friend::getFriendList()
+{
+    return m_pFriendListWidget;
 }
 
 // 槽函数：处理“显示在线用户”按钮的点击事件

@@ -6,13 +6,18 @@
 #include "protocol.h" // 包含 protocol 头文件，定义了协议数据单元 PDU
 #include <QFileDialog> // 包含 QFileDialog，用于文件选择对话框
 #include <QStandardPaths> // 新增这个头文件，用于获取标准路径
+#include "openwidget.h"
+#include "sharefile.h"
+#include <QListWidget>
 // Book 类的构造函数
 Book::Book(QWidget *parent)
     : QWidget{parent}
 {
+
     m_bDownload = false;
     m_iRecved = 0;
     m_iTotal = 0;
+    m_bInSharingProcess = false; // 初始化为不处于分享文件过程
     // 创建一个 QListWidget 控件，用于显示文件和文件夹列表
     m_pBookListw = new QListWidget(this);
     // 创建各种按钮
@@ -67,6 +72,8 @@ Book::Book(QWidget *parent)
     connect(&m_pTimer, &QTimer::timeout, this, &Book::uploadFileData);
     // 将下载按钮的 clicked 信号连接到 downloadFile 槽函数
     connect(m_pDownLoadPB, &QPushButton::clicked, this, &Book::downloadFile);
+    // 将分享文件按钮的 clicked 信号连接到 shareFile 槽函数
+    connect(m_pShareFilePB, &QPushButton::clicked, this, &Book::shareFile);
 }
 
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
@@ -159,6 +166,8 @@ void Book::flushFileSlot()
     free(pdu);
     pdu = NULL;
 }
+
+
 
 // 删除的槽函数
 void Book::delItem()
@@ -431,6 +440,55 @@ bool Book::getDownloadStatus()
     return m_bDownload;
 }
 
+// 点击“分享”按钮时调用的槽函数
+// 这个函数只负责触发刷新流程，而不立即执行分享操作，
+// 因为分享操作依赖于最新的好友列表，而好友列表的获取可能需要时间。
+void Book::shareFile()
+{
+    // m_bInSharingProcess 是一个布尔成员变量，用于标记当前是否处于分享流程中。
+    // 在触发好友列表刷新前，将其设置为 true。
+    m_bInSharingProcess = true;
+
+    // OpeWidget::getInstance().getFriend() 获取一个表示“好友”模块的单例对象。
+    // flushFriend() 是一个函数，它会发送一个请求，告诉服务器刷新好友列表。
+    // 刷新过程是异步的，当好友列表更新完毕后，会发送一个信号。
+    OpeWidget::getInstance().getFriend()->flushFriend();
+}
+
+// 当好友列表更新信号传来时，此槽函数被调用。
+// 这是一个事件驱动的函数，当好友列表刷新完成后，它会自动被触发。
+void Book::handleFriendListUpdated()
+{
+    // 检查是否是由于分享流程而触发的更新。
+    // 如果 m_bInSharingProcess 为 false，表示这次更新不是为了分享文件，
+    // 因此直接返回，避免不必要的后续操作。
+    if (!m_bInSharingProcess){
+        return;
+    }
+    // 重置状态，表示分享流程已进入处理阶段，后续的刷新不会再触发此逻辑。
+    m_bInSharingProcess = false;
+
+    // 获取好友列表的控件指针
+    Friend *pFriend = OpeWidget::getInstance().getFriend();
+    QListWidget *pFriendList = pFriend->getFriendList();
+
+    // 检查好友列表是否为空
+    if (pFriendList->count() == 0){
+        // 如果好友列表为空，则弹出提示框，告知用户无法分享。
+        QMessageBox::information(this, "分享文件", "好友列表为空，无法分享文件");
+        return;
+    }
+
+    // 调用 ShareFile 类的单例对象，并传入好友列表，更新分享窗口的 UI。
+    // updateFriend() 函数会根据好友列表动态创建复选框，并区分在线/离线状态。
+    ShareFile::getInstance().updateFriend(pFriendList);
+
+    // 检查 ShareFile 窗口是否隐藏
+    if(ShareFile::getInstance().isHidden()){
+        // 如果隐藏，则显示该窗口，让用户进行文件分享操作。
+        ShareFile::getInstance().show();
+    }
+}
 QString Book::getSaveFilePath()
 {
     return m_strSaveFilePath;
