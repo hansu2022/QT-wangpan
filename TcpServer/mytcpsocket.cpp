@@ -477,6 +477,35 @@ void MyTcpSocket::recvMsg()
             break;
         }
 
+        case ENUM_MSG_TYPE_RENAME_DIR_REQUEST:{
+            char caOldName[32] = {'\0'};
+            char caNewName[32] = {'\0'};
+            strncpy(caOldName,pdu->caData,32);
+            strncpy(caNewName,pdu->caData+32,32);
+            char *pPath = new char[pdu->uiMsgLen];
+            strncpy(pPath,pdu->caMsg,pdu->uiMsgLen);
+            pPath[pdu->uiMsgLen-1] = '\0';
+
+            QString strOldPath = QString("%1/%2").arg(pPath).arg(caOldName);
+            QString strNewPath = QString("%1/%2").arg(pPath).arg(caNewName);
+            QFileInfo fileInfo(strOldPath);
+            QDir dir;
+            bool ret = dir.rename(strOldPath,strNewPath);
+            PDU *respdu = mkPDU(0);
+            respdu->uiMsgType = ENUM_MSG_TYPE_RENAME_DIR_RESPOND;
+            if(ret){
+                strcpy(respdu->caData,"重命名成功");
+            }else{
+                strcpy(respdu->caData,"重命名失败");
+            }
+            write((char*)respdu,respdu->uiPDULen);
+            free(respdu);
+            respdu = NULL;
+            delete[] pPath;
+            pPath = NULL;
+            break;
+        }
+
         // 处理进入文件夹请求
         case ENUM_MSG_TYPE_ENTRY_DIR_REQUEST: {
             // 从PDU的caData字段中获取要进入的文件夹名称
