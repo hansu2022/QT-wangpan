@@ -424,7 +424,7 @@ void TcpClient::on_regist_pb_clicked()
     QString strPwd = ui->pwd_le->text();
     if(!strName.isEmpty()&&!strPwd.isEmpty()){
         PDU *pdu = mkPDU(0);
-        pdu->uiMsgType = ENUM_MSG_TYPE_REGIST_REQUEST;
+        pdu->uiMsgType = MsgType::ENUM_MSG_TYPE_REGIST_REQUEST;
         // 将用户名和密码复制到 PDU 数据区
         strncpy(pdu->caData,strName.toStdString().c_str(),32);
         strncpy(pdu->caData+32,strPwd.toStdString().c_str(),32);

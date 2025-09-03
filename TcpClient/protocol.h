@@ -6,7 +6,6 @@
 #include <memory>
 #include <cstring>
 
-namespace protocol{ // 使用命名空间避免全局污染
 
 // 1. 使用 const char* 替代宏定义
 constexpr const char* REGIST_OK = "regist ok";
@@ -109,9 +108,74 @@ struct PDU{
     PDU() : uiPDULen(0), uiMsgType(MsgType::MIN), vMsg() {
         memset(caData, 0, sizeof(caData));
     }
-    // 更新总长度的辅助函数
-    void updatePDULen() {
-        uiPDULen = sizeof(PDU) - sizeof(std::vector<char>) + vMsg.size();
+    // 计算并返回需要发送的字节流总长度
+    uint calculatePDULen() const {
+        // 这是正确的计算方式
+        return sizeof(uiPDULen) + sizeof(uiMsgType) + sizeof(caData) + vMsg.size();
+    }
+
+    // 将 PDU 对象序列化到一个字节缓冲区中
+    // 返回一个包含所有待发送数据的 vector
+    std::vector<char> serialize() const {
+        uint totalLen = calculatePDULen();
+        std::vector<char> buffer(totalLen);
+
+        char* current = buffer.data();
+
+        // 1. 拷贝总长度
+        memcpy(current, &totalLen, sizeof(totalLen));
+        current += sizeof(totalLen);
+
+        // 2. 拷贝消息类型
+        memcpy(current, &uiMsgType, sizeof(uiMsgType));
+        current += sizeof(uiMsgType);
+
+        // 3. 拷贝固定数据
+        memcpy(current, caData, sizeof(caData));
+        current += sizeof(caData);
+
+        // 4. 拷贝可变消息
+        if (!vMsg.empty()) {
+            memcpy(current, vMsg.data(), vMsg.size());
+        }
+
+        return buffer;
+    }
+
+    // 从字节缓冲区反序列化来填充 PDU 对象
+    static std::unique_ptr<PDU> deserialize(const char* buffer, size_t len) {
+        if (len < sizeof(uint) + sizeof(MsgType) + sizeof(caData)) {
+            // 缓冲区长度不足以容纳最小的 PDU 头部
+            return nullptr;
+        }
+
+        auto pdu = std::make_unique<PDU>();
+        const char* current = buffer;
+
+        // 1. 读取总长度 (实际上外部已经知道了，但我们可以用它来校验)
+        memcpy(&pdu->uiPDULen, current, sizeof(pdu->uiPDULen));
+        current += sizeof(pdu->uiPDULen);
+
+        if (pdu->uiPDULen != len) {
+            // 包长度不匹配，可能是一个不完整的或损坏的包
+            return nullptr;
+        }
+
+        // 2. 读取消息类型
+        memcpy(&pdu->uiMsgType, current, sizeof(pdu->uiMsgType));
+        current += sizeof(pdu->uiMsgType);
+
+        // 3. 读取固定数据
+        memcpy(pdu->caData, current, sizeof(pdu->caData));
+        current += sizeof(pdu->caData);
+
+        // 4. 读取可变消息
+        size_t msgLen = len - (sizeof(uint) + sizeof(MsgType) + sizeof(caData));
+        if (msgLen > 0) {
+            pdu->vMsg.resize(msgLen);
+            memcpy(pdu->vMsg.data(), current, msgLen);
+        }
+        return pdu;
     }
 };
 
@@ -120,5 +184,5 @@ struct PDU{
 // 参数是消息类型和消息体的大小
 std::unique_ptr<PDU> make_pdu(MsgType type, size_t msg_len = 0);
 
-}
+
 #endif // PROTOCOL_H

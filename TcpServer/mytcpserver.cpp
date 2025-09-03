@@ -27,52 +27,57 @@ void MyTcpServer::incomingConnection(qintptr socketDescriptor)
     m_tcpSocketList.append(pTcpSocket);
 
     // 连接信号和槽：当这个客户端下线时，触发 deleteSocket() 槽函数来清理资源
-    connect(pTcpSocket,SIGNAL(offline(MyTcpSocket*)),this,SLOT(deleteSocket(MyTcpSocket*)));
+        connect(pTcpSocket, &MyTcpSocket::offline, this, &MyTcpServer::deleteSocket);
+    // 连接信号和槽：当客户端成功登录时，触发 registerClient() 槽函数
+    connect(pTcpSocket, &MyTcpSocket::loggedIn, this, &MyTcpServer::registerClient);
 }
 
-// 转发消息的函数
+// 转发消息的函数 升级为了基于哈希表的快速查找（O(log n) 复杂度）
 // 参数：pername - 目标用户的名字，pdu - 要发送的数据包
-void MyTcpServer::resend(const char *pername, PDU *pdu)
+void MyTcpServer::resend(const QString &pername, const PDU &pdu)
 {
-    if (pername == NULL || pdu == NULL) {
+    if(pername.isEmpty()){
         return;
     }
 
-    QString strName = pername;
-    // 遍历所有已连接的客户端
-    for (int i = 0; i < m_tcpSocketList.size(); i++) {
-        // 查找与目标用户名匹配的客户端
-        if (m_tcpSocketList.at(i)->getName() == strName) {
-            // 找到后，将数据包发送给该客户端
-            m_tcpSocketList.at(i)->write((char*)pdu, pdu->uiPDULen);
-            break; // 找到并发送后，退出循环
-        }
+
+    // 使用QMap进行 O(log n) 的快速查找
+    MyTcpSocket *targetSocket = m_clientsMap.value(pername, nullptr);
+    if (targetSocket) {
+        std::vector<char> block = pdu.serialize();
+        targetSocket->write(block.data(), block.size());
+        qDebug() << "Resent message to" << pername;
+    } else {
+        qDebug() << "User" << pername << "not online or not found for resend.";
+    }
+}
+
+//【新增】槽函数，用于注册已登录的客户端
+void MyTcpServer::registerClient(MyTcpSocket *socket, const QString &name)
+{
+    if (socket && !name.isEmpty()) {
+        m_clientsMap.insert(name, socket);
+        qDebug() << "Client registered:" << name;
     }
 }
 
 // 槽函数：安全地删除已下线的客户端 socket
 void MyTcpServer::deleteSocket(MyTcpSocket *mysocket)
 {
+    if (!mysocket) return;
+
     qDebug() << "Client disconnected, preparing to delete socket for user:" << mysocket->getName();
 
-    // 1. 使用 removeOne 从列表中安全地移除该套接字的指针。
-    // 这个函数会查找并移除第一个匹配的项，返回true如果成功
-    bool removed = m_tcpSocketList.removeOne(mysocket);
-
-    if (removed) {
-        // 2. 使用 deleteLater() 来安全地销毁 QObject 对象。
-        // 这会将删除操作排入事件队列，在当前函数调用堆栈返回到事件循环后执行，
-        // 从而避免了在对象自身的方法仍在执行时删除它。
-        mysocket->deleteLater();
-        qDebug() << "Socket successfully scheduled for deletion.";
+    // 从快速查找映射中移除
+    if (!mysocket->getName().isEmpty()) {
+        m_clientsMap.remove(mysocket->getName());
     }
 
-    qDebug() << "Remaining clients:";
-    // 调试输出当前剩余的客户端
-    for(int i = 0; i < m_tcpSocketList.size(); i++){
-        // 确保列表中的指针有效才调用其成员函数
-        if(m_tcpSocketList.at(i)) {
-            qDebug() << m_tcpSocketList.at(i)->getName();
-        }
-    }
+    // 从列表中移除
+    m_tcpSocketList.removeOne(mysocket);
+
+    // 安全地销毁对象
+    mysocket->deleteLater();
+
+    qDebug() << "Socket scheduled for deletion. Remaining clients in map:" << m_clientsMap.keys();
 }
