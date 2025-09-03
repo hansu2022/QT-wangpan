@@ -75,47 +75,63 @@ Book::Book(QWidget *parent)
     connect(m_pUploadPB, &QPushButton::clicked, this, &Book::uploadFile);
     // 将上传文件数据的槽函数连接到定时器的 timeout 信号
     connect(&m_pTimer, &QTimer::timeout, this, &Book::uploadFileData);
-    // 将下载按钮的 clicked 信号连接到 downloadFile 槽函数
+    //将下载按钮的 clicked 信号连接到 downloadFile 槽函数
     connect(m_pDownLoadPB, &QPushButton::clicked, this, &Book::downloadFile);
-    // 将分享文件按钮的 clicked 信号连接到 shareFile 槽函数
-    connect(m_pShareFilePB, &QPushButton::clicked, this, &Book::shareFile);
-    // 将移动文件按钮的 clicked 信号连接到 moveFile 槽函数
-    connect(m_pMoveFilePB, &QPushButton::clicked, this, &Book::moveFile);
-    // 将目标目录按钮的 clicked 信号连接到 selectDir 槽函数
-    connect(m_pSelectDirPB, &QPushButton::clicked, this, &Book::selectDir);
+
+    // // 将分享文件按钮的 clicked 信号连接到 shareFile 槽函数
+    // connect(m_pShareFilePB, &QPushButton::clicked, this, &Book::shareFile);
+    // // 将移动文件按钮的 clicked 信号连接到 moveFile 槽函数
+    // connect(m_pMoveFilePB, &QPushButton::clicked, this, &Book::moveFile);
+    // // 将目标目录按钮的 clicked 信号连接到 selectDir 槽函数
+    // connect(m_pSelectDirPB, &QPushButton::clicked, this, &Book::selectDir);
 }
 
+void Book::flushFileSlot(){
+    // 1.获取当前路径
+    QString strCurPath = TcpClient::getInstance().curPath();
+    QByteArray pathData = strCurPath.toUtf8();
+    // 2. 使用工厂函数创建 PDU，vMsg 的大小为路径的长度
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_FLUSH_FILE_REQUEST, pathData.size());
+
+    // 3. 将路径数据拷贝到 vMsg 中
+    memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
+
+    // 4. 通过 TcpClient 发送 PDU
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+}
+
+
 // 刷新文件列表的槽函数，根据服务器返回的数据（pdu）更新显示
-void Book::flushFile(const PDU *pdu)
+void Book::flushFile(const PDU &pdu)
 {
-    // 检查 pdu 是否为空指针
-    if(pdu == NULL){
+    // 1. 从 pdu.vMsg 中获取序列化的数据
+    QByteArray buffer(pdu.vMsg.data(), pdu.vMsg.size());
+    QDataStream stream(&buffer, QIODevice::ReadOnly);
+
+    // 2. 反序列化数据到 QList<FileInfo>
+    QList<FileInfo> fileList;
+    stream >> fileList;
+
+    if (stream.status() != QDataStream::Ok) {
+        qWarning() << "Failed to deserialize file list.";
         return;
     }
-    // 清空当前的列表内容
+
+    // 3. 清空并用新数据填充UI列表
     m_pBookListw->clear();
-    FileInfo *pFileInfo = NULL;
-    // 计算 pdu->caMsg 中包含的文件/文件夹信息数量
-    int iCount = pdu->uiMsgLen/sizeof(FileInfo);
-    // 遍历所有文件/文件夹信息
-    for (int i = 0;i<iCount;i++){
-        // 将 PDU 数据块强制转换为 FileInfo 结构体指针
-        pFileInfo = (FileInfo*)(pdu->caMsg+i*sizeof(FileInfo));
-        // 将文件名从 char 数组转换为 QString
-        QString strFileName = QString(pFileInfo->caFileName);
-        // 创建一个新的列表项
+    for (const FileInfo& info : fileList) {
+        QString fileName = QString::fromStdString(info.sFileName);
         QListWidgetItem *pItem = new QListWidgetItem;
-        // 根据文件类型设置列表项的图标
-        if(pFileInfo->iFileType == 0){ // 0 代表文件夹
+
+        if (info.iFileType == 0) { // 0 代表文件夹
             pItem->setIcon(QIcon(QPixmap(":/dir.png")));
-        }else if(pFileInfo->iFileType == 1){ // 1 代表文件
+        } else if (info.iFileType == 1) { // 1 代表文件
             pItem->setIcon(QIcon(QPixmap(":/file.jpg")));
         }
-        // 设置列表项的显示文本为文件名
-        pItem->setText(strFileName);
-        // <-- 新增：将文件类型，存储到Item的UserRole中
-        pItem->setData(Qt::UserRole, pFileInfo->iFileType);
-        // 将列表项添加到 QListWidget 中
+
+        pItem->setText(fileName);
+        // 将文件类型存储到Item中，以便后续操作（如删除时判断）
+        pItem->setData(Qt::UserRole, info.iFileType);
         m_pBookListw->addItem(pItem);
     }
 }
@@ -126,54 +142,27 @@ void Book::createDirSlot()
 {
     // 弹出输入对话框，获取用户输入的文件夹名称
     QString strNewDir = QInputDialog::getText(this, "新建文件夹", "请输入文件夹名称:");
-    // 检查用户输入是否为空
-    if(!strNewDir.isEmpty()){
-        // 检查文件夹名称是否过长
-        if(strNewDir.size()>32){
-            // 弹出警告消息框
-            QMessageBox::warning(this,"新建文件夹","文件夹名称过长，不能超过32个字符");
-        }else{
-            // 获取当前登录用户名和当前目录路径
-            QString strName = TcpClient::getInstance().getLoginName();
-            QString strCurPath = TcpClient::getInstance().curPath();
-            // 创建一个 PDU，用于向服务器发送请求
-            PDU *pdu = mkPDU(strCurPath.size()+1);
-            pdu->uiMsgType = ENUM_MSG_TYPE_CREATE_DIR_REQUEST; // 设置消息类型为创建文件夹请求
-            // 将用户名复制到 pdu->caData 的前32个字节
-            strncpy(pdu->caData,strName.toStdString().c_str(),32);
-            pdu->caData[31] = '\0'; // 确保字符串以空字符结尾
-            // 将新文件夹名称复制到 pdu->caData 的后32个字节
-            strncpy(pdu->caData+32,strNewDir.toStdString().c_str(),32);
-            pdu->caData[63] = '\0'; // 确保字符串以空字符结尾
-            // 将当前路径复制到 pdu->caMsg
-            strcpy(pdu->caMsg,strCurPath.toStdString().c_str());
-            // 通过 TcpClient 发送 PDU
-            TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-            // 释放 PDU 内存
-            free(pdu);
-            pdu = NULL;
-        }
-    }else{
-        // 如果输入为空，弹出警告消息框
-        QMessageBox::warning(this,"新建文件夹","文件夹名称不能为空");
-    }
-}
 
-// 刷新文件的槽函数
-void Book::flushFileSlot()
-{
-    // 获取当前目录路径
+    if (strNewDir.isEmpty()) {
+        QMessageBox::warning(this, "新建文件夹", "文件夹名称不能为空");
+        return;
+    }
+    if (strNewDir.size() > 32) { // 协议限制 caData 中的文件名长度
+        QMessageBox::warning(this, "新建文件夹", "文件夹名称过长，不能超过32个字符");
+        return;
+    }
+    // 获取当前路径
     QString strCurPath = TcpClient::getInstance().curPath();
-    // 创建一个 PDU，用于向服务器发送刷新文件列表请求
-    PDU *pdu = mkPDU(strCurPath.size()+1);
-    pdu->uiMsgType = ENUM_MSG_TYPE_FLUSH_FILE_REQUEST; // 设置消息类型为刷新文件请求
-    // 将当前路径复制到 pdu->caMsg
-    strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
+    QByteArray pathData = strCurPath.toUtf8();
+
+    // 创建 PDU，vMsg 的大小为路径长度
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_CREATE_DIR_REQUEST, pathData.size());
+    // 将新文件夹名称拷贝到 caData 中
+    strncpy(pdu->caData, strNewDir.toStdString().c_str(), sizeof(pdu->caData)-1);
+    memcpy(pdu->vMsg.data(),pathData.constData(),pathData.size());
+
     // 通过 TcpClient 发送 PDU
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-    // 释放 PDU 内存
-    free(pdu);
-    pdu = NULL;
+    TcpClient::getInstance().sendPdu(std::move(pdu));
 }
 
 
@@ -213,102 +202,89 @@ void Book::delItem()
     int ret = msgBox.exec();
 
     if (ret == QMessageBox::Yes) {
-        // 用户确认后，才发送请求
+        // 1. 获取项目名和当前路径
+        QString itemName = pItem->text();
         QString strCurPath = TcpClient::getInstance().curPath();
-        PDU *pdu = mkPDU(strCurPath.size() + 1);
-        pdu->uiMsgType = ENUM_MSG_TYPE_DEL_ITEM_REQUEST;
-        strncpy(pdu->caData, itemName.toStdString().c_str(), 32);
-        pdu->caData[31] = '\0';
-        strncpy(pdu->caMsg, strCurPath.toStdString().c_str(), strCurPath.size());
+        QByteArray pathData = strCurPath.toUtf8();
 
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
-        free(pdu);
-        pdu = NULL;
+        // 2. 创建 PDU
+        auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_DEL_ITEM_REQUEST, pathData.size());
+
+        // 3. 填充数据 (项目名放入 caData，当前路径放入 vMsg)
+        strncpy(pdu->caData, itemName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+        memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
+
+        // 4. 发送
+        TcpClient::getInstance().sendPdu(std::move(pdu));
     }
 }
 
 // 重命名文件夹的槽函数
 void Book::reName()
 {
-    // 获取当前客户端的路径
-    QString strCurPath = TcpClient::getInstance().curPath();
-    // 获取用户在列表视图中当前选中的项目
-    QListWidgetItem *pItem =  m_pBookListw->currentItem();
-    // 如果没有选中任何项目，则弹出警告框并返回
-    if(pItem == NULL){
-        QMessageBox::warning(this,"重命名","请选择要重命名的文件");
+    QListWidgetItem *pItem = m_pBookListw->currentItem();
+    if (pItem == NULL) {
+        QMessageBox::warning(this, "重命名", "请选择要重命名的项目");
         return;
     }
-    // 获取要重命名的旧文件/文件夹名称
+
     QString strOldName = pItem->text();
-    // 弹出一个输入对话框，让用户输入新的文件/文件夹名称
-    QString strNewName = QInputDialog::getText(this, "重命名", "请输入新的文件名称:");
-    // 检查用户输入的新名称是否为空
-    if(!strNewName.isEmpty()){
-        // 检查新名称的长度是否超过32个字符
-        if(strNewName.size()>32){
-            QMessageBox::warning(this,"重命名","文件名称过长，不能超过32个字符");
-        }else{
-            // 创建一个PDU，用于封装重命名请求
-            PDU *pdu = mkPDU(strCurPath.size()+1);
-            // 设置消息类型为“重命名请求”
-            pdu->uiMsgType = ENUM_MSG_TYPE_RENAME_DIR_REQUEST;
-            // 将旧名称拷贝到PDU的caData字段的前32字节
-            strncpy(pdu->caData,strOldName.toStdString().c_str(),32);
-            // 确保旧名称字符串以空字符结尾
-            pdu->caData[31] = '\0';
-            // 将新名称拷贝到caData字段的后32字节
-            strncpy(pdu->caData+32,strNewName.toStdString().c_str(),32);
-            // 确保新名称字符串以空字符结尾
-            pdu->caData[63] = '\0';
-            // 将当前路径拷贝到 PDU 的 caMsg 字段中
-            strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
-            // 通过TCP socket发送PDU数据
-            TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-            // 释放动态分配的PDU内存
-            free(pdu);
-            pdu = NULL;
-        }
-    }else{
-        // 如果新名称为空，弹出警告框
-        QMessageBox::warning(this,"重命名","文件名称不能为空");
+    QString strNewName = QInputDialog::getText(this, "重命名", "请输入新的名称:", QLineEdit::Normal, strOldName);
+
+    if (strNewName.isEmpty()) {
+        QMessageBox::warning(this, "重命名", "名称不能为空");
+        return;
     }
+    if (strNewName.size() > 32) {
+        QMessageBox::warning(this, "重命名", "名称过长，不能超过32个字符");
+        return;
+    }
+    if (strNewName == strOldName) {
+        return; // 名称未改变，直接返回
+    }
+
+    // 1. 获取当前路径
+    QString strCurPath = TcpClient::getInstance().curPath();
+    QByteArray pathData = strCurPath.toUtf8();
+
+    // 2. 创建 PDU
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_RENAME_DIR_REQUEST, pathData.size());
+
+    // 3. 填充数据 (将旧名称和新名称用 '\0' 分隔后放入 caData)
+    //    这里我们直接用 QByteArray 来处理，更安全
+    QByteArray namesData;
+    namesData.append(strOldName.toUtf8()).append('\0').append(strNewName.toUtf8());
+    memcpy(pdu->caData, namesData.constData(), qMin((int)sizeof(pdu->caData), namesData.size()));
+
+    memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
+
+    // 4. 发送
+    TcpClient::getInstance().sendPdu(std::move(pdu));
 }
 
-// 进入文件夹的槽函数
-void Book::entryDir(const QModelIndex &index)
-{
-    // 获取被双击的 QListWidgetItem
+// 进入目录的槽函数
+void Book::entryDir(const QModelIndex &index){
     QListWidgetItem *item = m_pBookListw->item(index.row());
-    // 如果获取失败，直接返回
-    if (!item) return;
-    // 从项目数据中取出之前存储的类型信息（Qt::UserRole 是一个自定义角色）
-    int itemType = item->data(Qt::UserRole).toInt();
-    // 如果类型不为0（0代表文件夹），则表示双击的不是文件夹，直接返回，不发送请求
-    if (itemType != 0) { // 0 代表文件夹
-        return;
+    if (!item || item->data(Qt::UserRole).toInt() != 0) { // 0 代表文件夹
+        return; // 如果不是文件夹，则不处理
     }
-    // 获取被双击的文件夹名称
+
     QString strDirName = item->text();
-    // 将要进入的文件夹名称存储到客户端实例中
-    TcpClient::getInstance().setEnterDirName(strDirName);
-    // 获取当前客户端的路径
+    TcpClient::getInstance().setEnterDirName(strDirName); // 记录进入的目录名，用于更新路径
+
+    // 1. 获取当前路径
     QString strCurPath = TcpClient::getInstance().curPath();
-    // 创建一个PDU，用于封装“进入文件夹”请求
-    PDU *pdu = mkPDU(strCurPath.size()+1);
-    // 设置消息类型为“进入文件夹请求”
-    pdu->uiMsgType = ENUM_MSG_TYPE_ENTRY_DIR_REQUEST;
-    // 将要进入的文件夹名称拷贝到PDU的caData字段中，最多32字节
-    strncpy(pdu->caData,strDirName.toStdString().c_str(),32);
-    // 确保字符串以空字符结尾
-    pdu->caData[31] = '\0';
-    // 将当前路径拷贝到PDU的caMsg字段中
-    strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
-    // 通过TCP socket发送PDU数据
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-    // 释放动态分配的PDU内存
-    free(pdu);
-    pdu = NULL;
+    QByteArray pathData = strCurPath.toUtf8();
+
+    // 2. 创建 PDU
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_ENTRY_DIR_REQUEST, pathData.size());
+
+    // 3. 填充数据 (目标文件夹名放入 caData，当前路径放入 vMsg)
+    strncpy(pdu->caData, strDirName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+    memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
+
+    // 4. 发送
+    TcpClient::getInstance().sendPdu(std::move(pdu));
 }
 
 // 返回上一级目录的槽函数
@@ -334,113 +310,132 @@ void Book::returnDir()
     flushFileSlot();
 
 }
-
+// 上传文件的槽函数
 void Book::uploadFile()
 {
     m_strUploadFilePath = QFileDialog::getOpenFileName(this, "选择要上传的文件");
-    if(!m_strUploadFilePath.isEmpty()){
-        int index = m_strUploadFilePath.lastIndexOf('/');
-        QString strFileName = m_strUploadFilePath.mid(index+1);
-        QFile file(m_strUploadFilePath);
-        qint64 fileSize = file.size();
-
-        // 创建一个PDU，用于封装上传文件请求
-        QString strCurPath = TcpClient::getInstance().curPath();
-        PDU *pdu = mkPDU(strCurPath.size()+1);
-        pdu->uiMsgType = ENUM_MSG_TYPE_UPLOAD_FILE_REQUEST;
-        strncpy(pdu->caMsg,strCurPath.toStdString().c_str(),strCurPath.size());
-        sprintf(pdu->caData,"%s#%lld",strFileName.toStdString().c_str(),fileSize);
-
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-        free(pdu);
-        pdu = NULL;
-
-        //m_pTimer.start(1000); 不再需要定时器。
-
-    }else{
-        QMessageBox::warning(this,"上传文件","请选择要上传的文件");
-    }
-
-}
-
-void Book::uploadFileData()
-{
-    QFile file(m_strUploadFilePath);
-    if(!file.open(QIODevice::ReadOnly)){
-        QMessageBox::warning(this,"上传文件","文件打开失败");
+    if (m_strUploadFilePath.isEmpty()) {
+        QMessageBox::warning(this, "上传文件", "请选择要上传的文件");
         return;
     }
-    char *caBuf = new char[4096];
-    qint64 readSize = 0;
-    while(!file.atEnd()){
-        readSize = file.read(caBuf,4096);
-        if(readSize > 0){
-            if(TcpClient::getInstance().getTcpSocket().write(caBuf,readSize) == -1){
-                QMessageBox::warning(this,"上传文件","文件上传失败");
-                break;
-            }
-        }else{
-            QMessageBox::warning(this,"上传文件","文件读取出错，上传中断.");
-            break;
-        }
+
+    QFileInfo fileInfo(m_strUploadFilePath);
+    QString strFileName = fileInfo.fileName();
+    qint64 fileSize = fileInfo.size();
+
+    // 1. 获取当前路径
+    QString strCurPath = TcpClient::getInstance().curPath();
+    QByteArray pathData = strCurPath.toUtf8();
+
+    // 2. 创建 PDU
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_REQUEST, pathData.size());
+
+    // 3. 填充数据
+    // 使用 QString::asprintf 或 snprintf 更安全地格式化字符串
+    QString fileHeader = QString("%1#%2").arg(strFileName).arg(fileSize);
+    strncpy(pdu->caData, fileHeader.toStdString().c_str(), sizeof(pdu->caData) - 1);
+    memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
+
+    // 4. 发送
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+}
+
+void Book::startFileUpload()
+{
+    m_pTimer.start(1); // 立即开始，尽可能快地发送
+}
+
+void Book::uploadFileData(){
+    // 这个函数现在是 private slot，并且需要连接到 m_pTimer.timeout()
+    // connect(&m_pTimer, &QTimer::timeout, this, &Book::uploadFileData);
+
+    QFile file(m_strUploadFilePath);
+    // 每次都重新打开文件并seek，虽然效率稍低，但实现简单。
+    // 更高效的方式是将 QFile 对象作为成员变量。
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, "上传文件", "本地文件打开失败");
+        m_pTimer.stop();
+        return;
     }
+
+    // 计算已发送大小，并移动文件指针
+    static qint64 sentSize = 0; // 使用 static 或成员变量来跟踪进度
+    file.seek(sentSize);
+
+    char caBuf[4096] = {0};
+    qint64 readSize = file.read(caBuf, sizeof(caBuf));
+
+    if (readSize > 0) {
+        if (TcpClient::getInstance().getTcpSocket().write(caBuf, readSize) == -1) {
+            QMessageBox::warning(this, "上传文件", "文件上传失败：网络写入错误");
+            m_pTimer.stop();
+            sentSize = 0; // 重置进度
+        }
+        sentSize += readSize;
+    }
+
+    if (file.atEnd() || readSize == 0) {
+        // 文件发送完毕或读取完毕
+        m_pTimer.stop();
+        sentSize = 0; // 重置进度
+    }
+
     file.close();
-    delete[] caBuf;
-    caBuf = NULL;
 }
 
 void Book::downloadFile()
 {
+    qDebug() << "进入 downloadFile() 槽函数...";
+
     QListWidgetItem *pItem = m_pBookListw->currentItem();
-    if (pItem == NULL) {
-        QMessageBox::warning(this, "下载", "请选择要下载的文件");
-        qDebug() << "警告: 未选中任何项，下载操作中止。";
+    if (!pItem || pItem->data(Qt::UserRole).toInt() != 1) { // 1 代表文件
+        qDebug() << "错误：没有选择文件或所选项目不是文件。";
+        if (pItem) {
+            qDebug() << "选中的项目文本:" << pItem->text() << ", UserRole:" << pItem->data(Qt::UserRole).toInt();
+        } else {
+            qDebug() << "pItem 是 nullptr。";
+        }
+        QMessageBox::warning(this, "下载", "请选择一个文件进行下载");
         return;
     }
 
-    // 从Item中获取我们之前存储的类型信息
-    int itemType = pItem->data(Qt::UserRole).toInt();
-
-
-    if (itemType != 1) { // 1 代表文件
-        QMessageBox::warning(this, "下载", "只能下载文件，不能下载文件夹");
-        return;
-    }
-
-    // 1. 先从列表项获取要下载的文件名
     QString fileName = pItem->text();
+    qDebug() << "准备下载文件:" << fileName;
 
-    // 2. 获取系统的标准“下载”文件夹路径
     QString defaultPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    QString fullDefaultPath = QDir(defaultPath).filePath(fileName);
+    m_strSaveFilePath = QFileDialog::getSaveFileName(this, "保存文件", fullDefaultPath);
 
-    // 3. 将路径和文件名拼接成一个完整的建议路径
-    QString fullDefaultPath = defaultPath + "/" + fileName;
-
-    // 4. 将这个建议路径作为第三个参数传入文件对话框
-    QString strSaveFilePath = QFileDialog::getSaveFileName(this, "保存文件", fullDefaultPath);
-
-    // 弹窗让用户选择保存位置，如果用户取消则中止,不继续下载
-    if (strSaveFilePath.isEmpty()) {
-        return;
+    if (m_strSaveFilePath.isEmpty()) {
+        qDebug() << "用户取消了保存操作，未选择保存路径。";
+        return; // 用户取消
     }
+    qDebug() << "文件将保存到:" << m_strSaveFilePath;
 
-    m_strSaveFilePath = strSaveFilePath; // <-- 使用新的成员变量保存路径
 
+    // 1. 获取当前服务器路径
     QString strCurPath = TcpClient::getInstance().curPath();
+    QByteArray pathData = strCurPath.toUtf8();
+    qDebug() << "获取到当前服务器路径:" << strCurPath;
 
-    PDU *pdu = mkPDU(strCurPath.size() + 1);
-    pdu->uiMsgType = ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST;
-    strncpy(pdu->caData, fileName.toStdString().c_str(), 32);
-    strncpy(pdu->caMsg, strCurPath.toStdString().c_str(), strCurPath.size());
+    // 2. 创建 PDU
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST, pathData.size());
+    qDebug() << "创建PDU，消息类型: ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST, 消息体大小:" << pathData.size();
 
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
-    free(pdu);
-    pdu = NULL;
+    // 3. 填充数据 (要下载的文件名放入 caData，它所在的服务器路径放入 vMsg)
+    strncpy(pdu->caData, fileName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+    memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
+    qDebug() << "PDU填充数据完成。文件名:" << pdu->caData << ", 服务器路径:" << reinterpret_cast<char*>(pdu->vMsg.data());
 
+
+    // 4. 发送
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+    qDebug() << "已发送下载请求 PDU 到服务器。";
 }
 
 void Book::setDownloadStatus(bool status)
 {
+    qDebug() << "设置下载状态 m_bDownload 为:" << status;
     m_bDownload = status;
 }
 
@@ -449,122 +444,6 @@ bool Book::getDownloadStatus()
     return m_bDownload;
 }
 
-// 点击“分享”按钮时调用的槽函数
-// 这个函数只负责触发刷新流程，而不立即执行分享操作，
-// 因为分享操作依赖于最新的好友列表，而好友列表的获取可能需要时间。
-void Book::shareFile()
-{
-    // m_bInSharingProcess 是一个布尔成员变量，用于标记当前是否处于分享流程中。
-    // 在触发好友列表刷新前，将其设置为 true。
-    m_bInSharingProcess = true;
-
-    // OpeWidget::getInstance().getFriend() 获取一个表示“好友”模块的单例对象。
-    // flushFriend() 是一个函数，它会发送一个请求，告诉服务器刷新好友列表。
-    // 刷新过程是异步的，当好友列表更新完毕后，会发送一个信号。
-    OpeWidget::getInstance().getFriend()->flushFriend();
-}
-
-void Book::moveFile()
-{
-    QListWidgetItem *pItem = m_pBookListw->currentItem();
-    if (pItem == NULL) {
-        QMessageBox::warning(this, "移动文件", "请选择要移动的文件");
-        return;
-    }
-
-    m_strMoveFileName = pItem->text();
-    QString strCurPath = TcpClient::getInstance().curPath();
-    m_strMoveFilePath = strCurPath + '/' + m_strMoveFileName;
-    m_pSelectDirPB->setEnabled(true); // 启用目标目录按钮
-
-
-}
-
-void Book::selectDir()
-{
-    QListWidgetItem *pItem = m_pBookListw->currentItem();
-    if (pItem == NULL) {
-        // 虽然此时按钮是启用的，但用户可能在启用后取消了选择，所以这个检查仍然需要
-        m_pSelectDirPB->setEnabled(false); // 恢复按钮禁用状态
-        return;
-    }
-    int itemType = pItem->data(Qt::UserRole).toInt();
-    if (itemType != 0) { // 0 代表文件夹
-        QMessageBox::warning(this, "选择目标", "请选择一个文件夹作为目标目录！");
-        return;
-    }
-
-
-
-    QString strDestDir = pItem->text();
-    QString strCurPath = TcpClient::getInstance().curPath();
-    m_strDestDirPath = strCurPath + '/' + strDestDir;
-
-    if (m_strMoveFilePath == m_strDestDirPath) {
-        QMessageBox::warning(this, "移动文件", "不能将文件夹移动到其自身内部！");
-        return;
-    }
-
-    int srcLen = m_strMoveFilePath.size();
-    int destLen = m_strDestDirPath.size();
-    PDU *pdu = mkPDU(srcLen + destLen + 2); // 两个路径 + 两个'\0'
-    pdu->uiMsgType = ENUM_MSG_TYPE_MOVE_FILE_REQUEST;
-
-    // 将源路径和目标路径先后拷贝到 caMsg 中，用'\0'分隔
-    memcpy(pdu->caMsg, m_strMoveFilePath.toStdString().c_str(), srcLen);
-    pdu->caMsg[srcLen] = '\0';
-    memcpy(pdu->caMsg + srcLen + 1, m_strDestDirPath.toStdString().c_str(), destLen);
-    pdu->caMsg[srcLen + 1 + destLen] = '\0';
-
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
-    free(pdu);
-    pdu = NULL;
-
-    m_pSelectDirPB->setEnabled(false);
-
-}
-
-// 当好友列表更新信号传来时，此槽函数被调用。
-// 这是一个事件驱动的函数，当好友列表刷新完成后，它会自动被触发。
-void Book::handleFriendListUpdated()
-{
-    // 检查是否是由于分享流程而触发的更新。
-    // 如果 m_bInSharingProcess 为 false，表示这次更新不是为了分享文件，
-    // 因此直接返回，避免不必要的后续操作。
-    if (!m_bInSharingProcess){
-        return;
-    }
-    // 重置状态，表示分享流程已进入处理阶段，后续的刷新不会再触发此逻辑。
-    m_bInSharingProcess = false;
-
-    QListWidgetItem *pCurItem = m_pBookListw->currentItem();
-    if (pCurItem == NULL) {
-        QMessageBox::warning(this, "分享文件", "请选择要分享的文件");
-        return;
-    }
-    m_strShareFileName = pCurItem->text();
-
-    // 获取好友列表的控件指针
-    Friend *pFriend = OpeWidget::getInstance().getFriend();
-    QListWidget *pFriendList = pFriend->getFriendList();
-
-    // 检查好友列表是否为空
-    if (pFriendList->count() == 0){
-        // 如果好友列表为空，则弹出提示框，告知用户无法分享。
-        QMessageBox::information(this, "分享文件", "好友列表为空，无法分享文件");
-        return;
-    }
-
-    // 调用 ShareFile 类的单例对象，并传入好友列表，更新分享窗口的 UI。
-    // updateFriend() 函数会根据好友列表动态创建复选框，并区分在线/离线状态。
-    ShareFile::getInstance().updateFriend(pFriendList);
-
-    // 检查 ShareFile 窗口是否隐藏
-    if(ShareFile::getInstance().isHidden()){
-        // 如果隐藏，则显示该窗口，让用户进行文件分享操作。
-        ShareFile::getInstance().show();
-    }
-}
 QString Book::getSaveFilePath()
 {
     return m_strSaveFilePath;

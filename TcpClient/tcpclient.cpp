@@ -112,7 +112,44 @@ void TcpClient::recvMsg()
     // 1.将socket中所有可读数据追加到缓冲区
     m_buffer.append(m_tcpSocket.readAll());
 
-    // 2. 循环处理缓冲区中的数据，直到数据不足一个完整的包
+    Book *pBook = OpeWidget::getInstance().getBook();
+
+    // 2. 优先处理文件下载数据流
+    if (pBook->getDownloadStatus()) {
+        // 写入所有已接收的数据到文件
+        qint64 bytesWritten = m_file.write(m_buffer);
+        if (bytesWritten > 0) {
+            m_buffer.remove(0, bytesWritten); // 从缓冲区移除已写入的部分
+            pBook->m_iRecved += bytesWritten;
+        } else if (bytesWritten == -1) {
+            // 文件写入出错
+            QMessageBox::warning(this, "下载失败", "写入本地文件失败: " + m_file.errorString());
+            m_file.close();
+            pBook->setDownloadStatus(false);
+            // 清空缓冲区，因为不知道数据是否正确
+            m_buffer.clear();
+            return;
+        }
+
+        // 检查下载是否完成
+        if (pBook->m_iRecved >= pBook->m_iTotal) {
+            m_file.close();
+            QMessageBox::information(this, "下载文件", "文件下载成功！");
+
+            // 重置下载状态
+            pBook->m_iRecved = 0;
+            pBook->m_iTotal = 0;
+            pBook->setDownloadStatus(false);
+
+            // 重要：下载完成后，缓冲区里可能还有下一个PDU的数据，
+            // 所以不能直接 return，需要继续执行下面的PDU解析逻辑。
+        } else {
+            // 文件还未下载完，直接返回，等待下一次 readyRead 信号
+            return;
+        }
+    }
+
+    // 2. 循环处理缓冲区中的数据，直到数据不足一个完整的包\(仅在非下载状态，或下载刚完成时) 按PDU格式循环处理数据
     while(true){
         // 2.1 首先判断缓冲区数据是否足够读取一个PDU的头部长度
         if (m_buffer.size() < sizeof(uint)) {
@@ -173,6 +210,39 @@ void TcpClient::recvMsg()
         case MsgType::ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:
             OpeWidget::getInstance().getFriend()->updateGroupMsg(*pdu);
             break;
+        case MsgType::ENUM_MSG_TYPE_CREATE_DIR_RESPOND:
+            QMessageBox::information(this, "新建文件夹", pdu->caData);
+            // 新建文件夹成功后，刷新文件列表
+            OpeWidget::getInstance().getBook()->flushFileSlot();
+            break;
+        case MsgType::ENUM_MSG_TYPE_FLUSH_FILE_RESPOND:
+            OpeWidget::getInstance().getBook()->flushFile(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_DEL_ITEM_RESPOND:
+            QMessageBox::information(this, "删除文件/文件夹", pdu->caData);
+            // 删除文件/文件夹成功后，刷新文件列表
+            OpeWidget::getInstance().getBook()->flushFileSlot();
+            break;
+        case MsgType::ENUM_MSG_TYPE_RENAME_DIR_RESPOND:
+            QMessageBox::information(this, "重命名文件夹", pdu->caData);
+            // 重命名文件夹成功后，刷新文件列表
+            OpeWidget::getInstance().getBook()->flushFileSlot();
+            break;
+        case MsgType::ENUM_MSG_TYPE_ENTRY_DIR_RESPOND:
+            QMessageBox::warning(this, "进入文件夹", pdu->caData);
+            break;
+        case MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_RESPOND:
+            QMessageBox::information(this, "上传文件", pdu->caData);
+            // 上传文件成功后，刷新文件列表
+            OpeWidget::getInstance().getBook()->flushFileSlot();
+            break;
+        case MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_READY_RESPOND:
+            // 服务器准备好接收文件，开始发送文件数据
+            OpeWidget::getInstance().getBook()->uploadFileData();
+            break;
+        case MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_RESPOND:
+            handleDownloadFileResponse(*pdu);
+            break;
         default:
             qWarning() << "Unhandled message type:" << static_cast<uint>(pdu->uiMsgType);
             break;
@@ -193,9 +263,16 @@ void TcpClient::handleLoginResponse(const PDU& pdu)
 {
     if (strcmp(pdu.caData, LOGIN_OK) == 0) {
         m_strLoginName = ui->name_le->text();
-        m_strCurPath = QString("./%1").arg(m_strLoginName);
+        // 从vMsg中获取服务器返回的根目录路径
+        QString rootPath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+        if (rootPath.isEmpty()) {
+            QMessageBox::critical(this, "登录失败", "服务器未返回正确的用户路径。");
+            return;
+        }
+        setCurPath(rootPath);
         OpeWidget::getInstance().setUsrName(m_strLoginName);
         OpeWidget::getInstance().show();
+
         this->hide();
     } else if (strcmp(pdu.caData, LOGIN_FAILED) == 0) {
         QMessageBox::warning(this, "登录", LOGIN_FAILED);
@@ -266,6 +343,33 @@ void TcpClient::handlePrivateChatRequest(const PDU& pdu)
     privateChat.setChatName(senderName); // 设置聊天对象的名字
     privateChat.setWindowTitle(QString("与 %1 的私聊").arg(senderName)); // 设置窗口标题
     privateChat.showMsg(pdu); // 显示消息
+}
+
+void TcpClient::handleDownloadFileResponse(const PDU &pdu)
+{
+    // 1. 使用 QString::section 安全地解析文件名和大小
+    QString dataStr = QString::fromUtf8(pdu.caData);
+    QString fileName = dataStr.section('#', 0, 0);
+    qint64 fileSize = dataStr.section('#', 1, 1).toLongLong();
+
+    Book *pBook = OpeWidget::getInstance().getBook();
+
+    // 2. 根据服务器返回的文件大小判断是否有效
+    if (fileSize == -1) { // -1 是我们约定的错误码
+        QMessageBox::warning(this, "下载文件", "服务器未能找到该文件或文件无效。");
+        return;
+    }
+
+    // 3. 准备接收文件
+    pBook->m_iTotal = fileSize;
+    pBook->m_iRecved = 0;
+    pBook->setDownloadStatus(true);
+
+    m_file.setFileName(pBook->getSaveFilePath());
+    if (!m_file.open(QIODevice::WriteOnly)) {
+        QMessageBox::warning(this, "下载文件", "本地文件创建失败，请检查路径或权限。");
+        pBook->setDownloadStatus(false); // 打开失败，重置状态
+    }
 }
 
 

@@ -132,27 +132,27 @@ void MyTcpSocket::recvMsg()
         case MsgType::ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:
             handleGroupChatRequest(*pdu);
             break;
-        // case MsgType::ENUM_MSG_TYPE_CREATE_DIR_REQUEST:
-        //     handleCreateDirRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_FLUSH_FILE_REQUEST:
-        //     handleFlushFileRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_DEL_ITEM_REQUEST:
-        //     handleDelItemRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_RENAME_DIR_REQUEST:
-        //     handleRenameDirRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_ENTRY_DIR_REQUEST:
-        //     handleEntryDirRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_REQUEST:
-        //     handleUploadFileRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST:
-        //     handleDownloadFileRequest(*pdu);
-        //     break;
+        case MsgType::ENUM_MSG_TYPE_CREATE_DIR_REQUEST:
+            handleCreateDirRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_FLUSH_FILE_REQUEST:
+            handleFlushFileRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_DEL_ITEM_REQUEST:
+            handleDelItemRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_RENAME_DIR_REQUEST:
+            handleRenameDirRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_ENTRY_DIR_REQUEST:
+            handleEntryDirRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_REQUEST:
+            handleUploadFileRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST:
+            handleDownloadFileRequest(*pdu);
+            break;
         // case MsgType::ENUM_MSG_TYPE_SHARE_FILE_REQUEST:
         //     handleShareFileRequest(*pdu);
         //     break;
@@ -199,9 +199,25 @@ void MyTcpSocket::handleRegistRequest(const PDU &pdu)
 
     // 4. 填充响应数据
     if (ret) {
-        strncpy(respdu->caData, REGIST_OK, sizeof(respdu->caData) - 1);
+        QString userDirPath = QString("./user_data/%1").arg(caName);
+
         QDir dir;
-        dir.mkdir(QString("./user_data/%1").arg(caName));
+        // 检查并创建 user_data 父目录 (如果它不存在的话)，这让程序更健壮
+        if (!dir.exists("./user_data")) {
+            dir.mkdir("./user_data");
+        }
+
+        // 在指定路径下创建用户的专属文件夹
+        bool success = dir.mkdir(userDirPath);
+
+        // 【强烈建议】检查文件夹是否创建成功，并打印日志
+        if (success) {
+            strncpy(respdu->caData, REGIST_OK, sizeof(respdu->caData) - 1);
+            qDebug() << "为新用户创建目录成功:" << userDirPath;
+        } else {
+            // 如果创建失败，这是一个严重的服务器端问题，需要记录下来
+            qWarning() << "！！！为新用户创建目录失败:" << userDirPath;
+        }
     } else {
         strncpy(respdu->caData, REGIST_FAILED, sizeof(respdu->caData) - 1);
     }
@@ -231,15 +247,20 @@ void MyTcpSocket::handleLoginRequest(const PDU &pdu)
     bool ret = OpeDB::getInstance().handleLogin(caName.toStdString().c_str(), caPwd.toStdString().c_str());
 
 
-    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_LOGIN_RESPOND);
     if (ret) {
+        QString rootPath = QString("./user_data/%1").arg(caName);
+        QByteArray pathData = rootPath.toUtf8();
+                auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_LOGIN_RESPOND, pathData.size());
         strncpy(respdu->caData, LOGIN_OK, sizeof(respdu->caData) - 1);
+        memcpy(respdu->vMsg.data(), pathData.constData(), pathData.size());
         m_strName = caName; // 登录成功，记录用户名
         emit loggedIn(this, m_strName); // 通知服务器该用户已登录
+            sendPdu(std::move(respdu));
     } else {
+        auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_LOGIN_RESPOND);
         strncpy(respdu->caData, LOGIN_FAILED, sizeof(respdu->caData) - 1);
+        sendPdu(std::move(respdu));
     }
-    sendPdu(std::move(respdu));
 }
 
 /**
@@ -499,6 +520,266 @@ void MyTcpSocket::handleGroupChatRequest(const PDU& pdu){
     }
 }
 
+/**
+ * @brief 处理客户端创建文件夹的请求
+ * @param pdu 包含文件夹信息的请求PDU
+ */
+void MyTcpSocket::handleCreateDirRequest(const PDU& pdu)
+{
+    // 1. 解析请求数据
+    QString newDirName = QString::fromUtf8(pdu.caData);
+    QString currentPath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+
+    if (newDirName.isEmpty() || currentPath.isEmpty()) {
+        qWarning() << "Create dir request failed: Invalid parameters.";
+        return;
+    }
+
+    qDebug() << "创建文件夹请求 -> 路径:" << currentPath << "新文件夹名:" << newDirName;
+
+    // 2. 准备响应PDU
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_CREATE_DIR_RESPOND);
+    const char* responseMsg = nullptr;
+
+    // 3. 执行核心逻辑
+    QDir dir(currentPath);
+    if (!dir.exists()) {
+        responseMsg = "当前路径不存在，创建失败";
+    } else {
+        QString newPath = dir.filePath(newDirName);
+        if (dir.exists(newPath)) {
+            responseMsg = "文件夹已存在，创建失败";
+        } else {
+            if (dir.mkdir(newDirName)) {
+                responseMsg = "创建文件夹成功";
+            } else {
+                responseMsg = "创建文件夹失败，可能是权限不足";
+            }
+        }
+    }
+
+    // 4. 填充并发送响应
+    strncpy(respdu->caData, responseMsg, sizeof(respdu->caData) - 1);
+    sendPdu(std::move(respdu));
+}
+
+/**
+ * @brief 处理刷新文件列表的请求 (实际执行者)
+ * @param path 需要刷新文件列表的目录路径
+ */
+void MyTcpSocket::handleFlushFileRequest(const QString& path)
+{
+    qDebug() << "刷新文件列表 -> 路径:" << path;
+
+    QFileInfoList fileInfoList = QDir(path).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
+
+    QList<FileInfo> fileList;
+    for (const QFileInfo& fileInfo : fileInfoList) {
+        FileInfo info;
+        info.sFileName = fileInfo.fileName().toStdString();
+        info.iFileType = fileInfo.isDir() ? 0 : 1;
+        fileList.append(info);
+    }
+
+    QByteArray buffer;
+    QDataStream stream(&buffer, QIODevice::WriteOnly);
+    stream << fileList;
+
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_FLUSH_FILE_RESPOND, buffer.size());
+    if (!buffer.isEmpty()) {
+        memcpy(respdu->vMsg.data(), buffer.constData(), buffer.size());
+    }
+    sendPdu(std::move(respdu));
+}
+
+/**
+ * @brief 处理客户端刷新文件列表的请求 (协议接口)
+ * @param pdu 包含目录路径的请求PDU
+ */
+void MyTcpSocket::handleFlushFileRequest(const PDU& pdu)
+{
+    QString path = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+    handleFlushFileRequest(path);
+}
+
+/**
+ * @brief 处理删除文件或文件夹的请求
+ * @param pdu 包含项目信息的请求PDU
+ */
+void MyTcpSocket::handleDelItemRequest(const PDU& pdu){
+    // 1. 解析请求数据
+    QString itemName = QString::fromUtf8(pdu.caData);
+    QString parentPath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+    QString fullPath = QDir(parentPath).filePath(itemName);
+    qDebug() << "删除项目请求 -> 路径:" << fullPath;
+
+    // 2. 准备响应PDU
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_DEL_ITEM_RESPOND);
+    const char* responseMsg = nullptr;
+
+    // 3. 执行删除操作
+    QFileInfo fileInfo(fullPath);
+    if(!fileInfo.exists()){
+        responseMsg = "项目不存在，删除失败";
+    }else{
+        bool success = false;
+        if(fileInfo.isDir()){
+            QDir dir(fullPath);
+            success = dir.removeRecursively();
+        }else{
+            success = QFile::remove(fullPath);
+        }
+        responseMsg = success ? "删除成功" : "删除失败，可能是权限不足";
+    }
+    // 4. 填充并发送响应
+    strncpy(respdu->caData, responseMsg, sizeof(respdu->caData) - 1);
+    sendPdu(std::move(respdu));
+}
+
+/**
+ * @brief 处理重命名文件或文件夹的请求
+ * @param pdu 包含重命名信息的请求PDU
+ */
+void MyTcpSocket::handleRenameDirRequest(const PDU& pdu){
+    // 1. 解析请求数据
+    QList<QByteArray> parts = QByteArray(pdu.caData,sizeof(pdu.caData)).split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid rename request format";
+        return;
+    }
+    QString oldName = QString::fromUtf8(parts[0]);
+    QString newName = QString::fromUtf8(parts[1]);
+    QString parentPath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+
+    QString oldPath = QDir(parentPath).filePath(oldName);
+    QString newPath = QDir(parentPath).filePath(newName);
+
+    qDebug() << "重命名请求 -> 旧名称:" << oldPath << "新名称:" << newPath;
+
+    // 2. 准备响应PDU
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_RENAME_DIR_RESPOND);
+    const char* responseMsg = nullptr;
+
+    // 3. 执行重命名操作
+    if(QFile::exists(newPath)){
+        responseMsg = "新名称已存在，重命名失败";
+    }else{
+        bool success = QFile::rename(oldPath, newPath);
+        responseMsg = success ? "重命名成功" : "重命名失败";
+    }
+    // 4. 填充并发送响应
+    strncpy(respdu->caData, responseMsg, sizeof(respdu->caData) - 1);
+    sendPdu(std::move(respdu));
+}
+
+/**
+ * @brief 处理进入文件夹的请求
+ * @param pdu caData中是要进入的文件夹名, vMsg中是当前路径
+ */
+void MyTcpSocket::handleEntryDirRequest(const PDU &pdu)
+{
+    // 1. 解析请求数据
+    QString dirName = QString::fromUtf8(pdu.caData);
+    QString currentPath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+    QString enterPath = QDir(currentPath).filePath(dirName);
+
+    qDebug() << "进入文件夹请求 -> 当前路径:" << currentPath << "目标文件夹:" << dirName;
+
+    // 2. 检查路径有效性
+    QFileInfo fileInfo(enterPath);
+    if (!fileInfo.exists() || !fileInfo.isDir()) {
+        // 目标不存在或是个文件，发送错误响应
+        auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_ENTRY_DIR_RESPOND);
+        const char* errorMsg = fileInfo.exists() ? "进入失败：目标不是文件夹" : "进入失败：目标不存在";
+        strncpy(respdu->caData, errorMsg, sizeof(respdu->caData) - 1);
+        sendPdu(std::move(respdu));
+        return;
+    }
+
+    // 3. 目标是有效文件夹，直接调用刷新文件列表的逻辑
+    // 注意：这里我们直接传递新的路径，而不是整个PDU
+    handleFlushFileRequest(enterPath);
+}
+
+/**
+ * @brief 处理上传文件的初始请求
+ * @param pdu caData格式为"文件名#文件大小", vMsg为上传目录
+ */
+void MyTcpSocket::handleUploadFileRequest(const PDU& pdu)
+{
+    // 1. 解析文件名和大小
+    QString strData = QString::fromUtf8(pdu.caData);
+    QString fileName = strData.section('#', 0, 0);
+    qint64 fileSize = strData.section('#', 1, 1).toLongLong();
+
+    // 2. 解析保存路径并构建完整路径
+    QString savePath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+    QString fullSavePath = QDir(savePath).filePath(fileName);
+
+    qDebug() << "上传文件请求 ->" << fullSavePath << "大小:" << fileSize;
+
+    // 3. 准备接收文件
+    m_file.setFileName(fullSavePath);
+    if (m_file.open(QIODevice::WriteOnly)) {
+        // 文件创建成功，设置状态变量
+        m_bUpload = true;
+        m_iTotal = fileSize;
+        m_iRecved = 0;
+
+        // 回复客户端：准备就绪，可以发送文件数据
+        auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_READY_RESPOND);
+        sendPdu(std::move(respdu));
+    } else {
+        // 文件创建失败，直接回复最终的失败响应
+        auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_RESPOND);
+        strncpy(respdu->caData, "服务器创建文件失败", sizeof(respdu->caData) - 1);
+        sendPdu(std::move(respdu));
+    }
+}
+
+/**
+ * @brief 处理下载文件的请求
+ * @param pdu caData为文件名, vMsg为文件所在目录
+ */
+void MyTcpSocket::handleDownloadFileRequest(const PDU& pdu)
+{
+    // 1. 解析文件名和路径
+    QString fileName = QString::fromUtf8(pdu.caData);
+    QString filePath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+    QString fullPath = QDir(filePath).filePath(fileName);
+
+    qDebug() << "下载文件请求 ->" << fullPath;
+
+    // 2. 检查文件有效性
+    QFileInfo fileInfo(fullPath);
+    if (!fileInfo.exists() || !fileInfo.isFile()) {
+        auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_RESPOND);
+        // 通过文件大小为-1来表示文件无效
+        QString responseData = QString("%1#%2").arg(fileName).arg(-1);
+        strncpy(respdu->caData, responseData.toStdString().c_str(), sizeof(respdu->caData) - 1);
+        sendPdu(std::move(respdu));
+        return;
+    }
+
+    // 3. 文件有效，准备发送
+    qint64 fileSize = fileInfo.size();
+
+    // 4. 先回复客户端，告知文件名和大小
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_RESPOND);
+    QString responseData = QString("%1#%2").arg(fileName).arg(fileSize);
+    strncpy(respdu->caData, responseData.toStdString().c_str(), sizeof(respdu->caData) - 1);
+    sendPdu(std::move(respdu));
+
+    // 5. 准备通过定时器发送文件内容
+    m_file.setFileName(fullPath);
+    if (!m_file.open(QIODevice::ReadOnly)) {
+        qWarning() << "打开文件失败，无法发送:" << fullPath;
+        return;
+    }
+
+    // 启动定时器，sendFileToClient 会被循环调用
+    m_pTimer->start(1);
+}
 
 void MyTcpSocket::sendPdu(std::unique_ptr<PDU> pdu)
 {

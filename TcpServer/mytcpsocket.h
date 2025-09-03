@@ -37,7 +37,9 @@ private:
     void handleGroupChatRequest(const PDU& pdu);
 
     void handleCreateDirRequest(const PDU& pdu);
+    void handleFlushFileRequest(const QString& path);
     void handleFlushFileRequest(const PDU& pdu);
+
     void handleDelItemRequest(const PDU& pdu);
     void handleRenameDirRequest(const PDU& pdu);
     void handleEntryDirRequest(const PDU& pdu);

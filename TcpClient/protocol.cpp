@@ -14,4 +14,3 @@ std::unique_ptr<PDU> make_pdu(MsgType type,size_t msg_len){
     pdu->uiPDULen = pdu->calculatePDULen();
     return pdu;
 }
-

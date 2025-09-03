@@ -14,7 +14,7 @@ class Book : public QWidget
     Q_OBJECT
 public:
     explicit Book(QWidget *parent = nullptr);
-    void flushFile(const PDU *pdu);
+    void flushFile(const PDU &pdu);
     void delItem();// 新增一个统一删除的方法
     void reName();
     void entryDir(const QModelIndex &index);
@@ -31,13 +31,14 @@ public:
     qint64 m_iTotal;
     qint64 m_iRecved;
     QString getShareFileName();
+    void startFileUpload();
 
 signals:
 
 public slots:
     void createDirSlot();
     void flushFileSlot();
-    void handleFriendListUpdated(); // 处理好友列表更新的槽函数
+    // void handleFriendListUpdated(); // 处理好友列表更新的槽函数
 private:
 
     QListWidget *m_pBookListw;

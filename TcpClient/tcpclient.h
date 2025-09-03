@@ -56,6 +56,7 @@ private:
     void handleDelFriendNotice(const PDU& pdu); // 处理删除好友通知
     void handlePrivateChatRequest(const PDU& pdu);// 处理私聊请求
     void handleGroupChatRequest(const PDU& pdu); // 处理群聊请求
+    void handleDownloadFileResponse(const PDU& pdu); // 处理下载文件响应
 
 
     QString m_strLoginName;

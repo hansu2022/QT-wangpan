@@ -5,7 +5,8 @@
 #include <vector>
 #include <memory>
 #include <cstring>
-
+#include <QDataStream>
+#include <QString>
 
 // 1. 使用 const char* 替代宏定义
 constexpr const char* REGIST_OK = "regist ok";
@@ -177,6 +178,7 @@ struct PDU{
         }
         return pdu;
     }
+
 };
 
 // 4. 创建PDU的工厂函数，返回智能指针
@@ -184,5 +186,22 @@ struct PDU{
 // 参数是消息类型和消息体的大小
 std::unique_ptr<PDU> make_pdu(MsgType type, size_t msg_len = 0);
 
+// 让 QDataStream 知道如何序列化和反序列化 FileInfo
+
+
+
+inline QDataStream &operator<<(QDataStream &stream, const FileInfo &info) {
+    stream << QString::fromStdString(info.sFileName) << static_cast<qint32>(info.iFileType);
+    return stream;
+}
+
+inline QDataStream &operator>>(QDataStream &stream, FileInfo &info) {
+    QString fileName;
+    qint32 fileType;
+    stream >> fileName >> fileType;
+    info.sFileName = fileName.toStdString();
+    info.iFileType = fileType;
+    return stream;
+}
 
 #endif // PROTOCOL_H
