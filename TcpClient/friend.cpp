@@ -78,29 +78,34 @@ Friend::Friend(QWidget *parent)
 
 // 槽函数：显示所有在线用户
 // PDU* pdu 参数是来自服务器的数据单元，包含了在线用户信息
-void Friend::showAllOnlineUsr(PDU *pdu)
+void Friend::showAllOnlineUsr(const PDU &pdu)
 {
-    // 如果传入的 PDU 为空，则直接返回
-    if(pdu == NULL){
-        return;
-    }
-    // 调用 m_pOnline 对象的 showUsr() 方法来显示用户列表
-    m_pOnline->showUsr(pdu);
+    m_pOnline->showUsr(pdu); // 调用 Online 类的方法显示在线用户
 }
 
-void Friend::showAllFriend(PDU *pdu)
+void Friend::showAllFriend(const PDU &pdu)
 {
-    if(pdu == NULL){
-        return;
-    }
+    qDebug() << "客户端 -> 收到服务器的好友列表响应。";
     m_pFriendListWidget->clear();
-    uint uiSize = pdu->uiMsgLen/32;
-    char caTmp[32];
-    for(uint i = 0;i<uiSize;i++){
-        memcpy(caTmp,(char*)(pdu->caMsg)+i*32,32);
-        m_pFriendListWidget->addItem(caTmp);
+
+    // 1. 使用 QDataStream 反序列化服务器发来的好友列表
+    QByteArray data(pdu.vMsg.data(), pdu.vMsg.size());
+    QDataStream stream(&data, QIODevice::ReadOnly);
+    QStringList friendList;
+    stream >> friendList; // 从数据流中读出 QStringList
+    qDebug() << "客户端 -> 反序列化完成，获得的好友列表为:" << friendList;
+
+    // 2. 将好友列表显示在 QListWidget 中
+    if(!friendList.isEmpty()){
+        m_pFriendListWidget->addItems(friendList);
+        qDebug() << "客户端 -> 好友列表已成功添加到 QListWidget。";
+    } else {
+        qDebug() << "客户端 -> 好友列表为空，QListWidget 被清空。";
     }
+
+    // 3. 发出好友列表更新信号
     emit friendListUpdated(); // 发出好友列表更新信号
+    qDebug() << "客户端 -> 已发出 friendListUpdated 信号。";
 }
 
 QListWidget *Friend::getFriendList()
@@ -111,21 +116,12 @@ QListWidget *Friend::getFriendList()
 // 槽函数：处理“显示在线用户”按钮的点击事件
 void Friend::showOnline()
 {
-    // 检查 m_pOnline 窗口是否被隐藏
-    if(m_pOnline->isHidden()){
-        // 如果隐藏，则显示窗口
+    if (m_pOnline->isHidden()) {
         m_pOnline->show();
-        // 创建一个 PDU 数据包
-        PDU *pdu = mkPDU(0);
-        // 设置消息类型为“所有在线用户请求”
-        pdu->uiMsgType = ENUM_MSG_TYPE_ALL_ONLINE_REQUEST;
-        // 获取 TCP 客户端实例并发送数据包
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-        // 释放 PDU 内存
-        free(pdu);
-        pdu = NULL;
-    }else{
-        // 如果已显示，则隐藏窗口
+        // 使用工厂函数创建PDU，并用新接口发送
+        auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_ALL_ONLINE_REQUEST);
+        TcpClient::getInstance().sendPdu(std::move(pdu));
+    } else {
         m_pOnline->hide();
     }
 }
@@ -133,37 +129,26 @@ void Friend::showOnline()
 // 槽函数：处理“查找用户”按钮的点击事件
 void Friend::searchUsr()
 {
-    // 弹出输入对话框，让用户输入要搜索的用户名
-    m_strSearchName =QInputDialog::getText(this,"搜索","用户名:");
-    // 检查用户是否输入了内容
+    m_strSearchName = QInputDialog::getText(this,"搜索", "用户名:");
     if(!m_strSearchName.isEmpty()){
-        // 在调试控制台输出搜索的用户名
-        qDebug() << m_strSearchName;
-        // 创建一个 PDU 数据包
-        PDU *pdu = mkPDU(0);
-        // 设置消息类型为“查找用户请求”
-        pdu->uiMsgType = ENUM_MSG_TYPE_SEARCH_USR_REQUEST;
+        qDebug() << "Searching for:" << m_strSearchName;
+        auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_SEARCH_USR_REQUEST);
+        
         // 将输入的用户名复制到 PDU 的数据区
-        strncpy(pdu->caData,m_strSearchName.toStdString().c_str(),32);
-        // 获取 TCP 客户端实例并发送数据包
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-        // 释放 PDU 内存
-        free(pdu);
-        pdu = NULL;
+        strncpy(pdu->caData, m_strSearchName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+        TcpClient::getInstance().sendPdu(std::move(pdu));
     }
 }
 
+// 槽函数：处理“刷新好友列表”按钮的点击事件
 void Friend::flushFriend()
 {
     QString strName = TcpClient::getInstance().getLoginName();
-    PDU *pdu = mkPDU(0);
-    pdu->uiMsgType = ENUM_MSG_TYPE_FLUSH_FRIEND_REQUEST;
-    strncpy(pdu->caData,strName.toStdString().c_str(),32);
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-    free(pdu);
-    pdu = NULL;
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_FLUSH_FRIEND_REQUEST);
+    strncpy(pdu->caData, strName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+    TcpClient::getInstance().sendPdu(std::move(pdu));
 }
-
+//
 void Friend::delFriend()
 {
     if (m_pFriendListWidget->currentItem() == NULL) {
@@ -182,31 +167,20 @@ void Friend::delFriend()
         // 如果没有括号，则说明是纯用户名，直接使用
         strfriendName = strfriendInfo;
     }
-    QString questionText = QString("您确定要删除好友 %1 吗？\n此操作不可恢复。").arg(strfriendName);
-    QMessageBox::StandardButton reply;
-    reply = QMessageBox::question(this, // 父窗口
-                                  "删除好友确认", // 对话框标题
-                                  questionText, // 对话框内容
-                                  QMessageBox::Yes | QMessageBox::No, // 显示“是”和“否”两个按钮
-                                  QMessageBox::No); // 默认选中的按钮是“否”
-
-    if (reply == QMessageBox::Yes) {
-        // 如果用户点击了“是”，才执行真正的删除逻辑（即发送请求给服务器）
-        // 这部分代码就是您原来函数里的网络请求代码
-        PDU *pdu = mkPDU(0);
-        pdu->uiMsgType = ENUM_MSG_TYPE_DEL_FRIEND_REQUEST;
+    QString questionText = QString("您确定要删除好友 %1 吗？").arg(strfriendName);
+    if (QMessageBox::question(this, "删除好友确认", questionText, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes)
+    {
+        auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_DEL_FRIEND_REQUEST);
         QString strMyName = TcpClient::getInstance().getLoginName();
 
-        // 确保数据顺序正确：自己的名字在前，好友的名字在后
-        strncpy(pdu->caData, strMyName.toStdString().c_str(), 32);
-        pdu->caData[31] = '\0';
+        // 按照服务器新格式打包数据 ("自己\0好友")
+        QByteArray data;
+        data.append(strMyName.toUtf8());
+        data.append('\0');
+        data.append(strfriendName.toUtf8());
+        memcpy(pdu->caData, data.constData(), data.size());
 
-        strncpy(pdu->caData + 32, strfriendName.toStdString().c_str(), 32);
-        pdu->caData[63] = '\0';
-
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
-        free(pdu);
-        pdu = NULL;
+        TcpClient::getInstance().sendPdu(std::move(pdu));
     }// 如果用户点击了“否”，则什么也不做，函数直接结束。
 }
 
@@ -244,26 +218,41 @@ void Friend::groupMsgSend()
 {
     QString strMsg = m_pInputMsgLE->text();
 
-    if(!strMsg.isEmpty()){
-        PDU *pdu = mkPDU(strMsg.size()+1);
-        pdu->uiMsgType = ENUM_MSG_TYPE_GROUP_CHAT_REQUEST;
-        QString strLoginName = TcpClient::getInstance().getLoginName();
-        strncpy(pdu->caData,strLoginName.toStdString().c_str(),32);
-        strcpy(pdu->caMsg,strMsg.toStdString().c_str());
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen);
-        free(pdu);
-        pdu = NULL;
-        QString strShowMsg = QString("我：%1").arg(strMsg);
-        m_pShowMsgTE->append(strShowMsg);
-        m_pInputMsgLE->clear();
-    }else{
-        QMessageBox::critical(this,"发送消息","发送消息不能为空");
+    if (strMsg.isEmpty()) {
+        QMessageBox::warning(this, "发送消息", "发送消息不能为空");
+        return;
     }
+
+    QString strLoginName = TcpClient::getInstance().getLoginName();
+    QByteArray msgBytes = strMsg.toUtf8(); // 将消息转为UTF-8字节数组
+
+    // 1. 创建PDU，消息长度为字节数组的长度
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_GROUP_CHAT_REQUEST, msgBytes.size());
+
+    // 2. 发送者名字放入 caData
+    strncpy(pdu->caData, strLoginName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+
+    // 3. 聊天内容放入 vMsg
+    memcpy(pdu->vMsg.data(), msgBytes.constData(), msgBytes.size());
+
+    // 4. 发送
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+
+    // 5. 更新本地显示
+    QString strShowMsg = QString("我：%1").arg(strMsg);
+    m_pShowMsgTE->append(strShowMsg);
+    m_pInputMsgLE->clear();
 }
 
-void Friend::updateGroupMsg(QString strMsg)
+void Friend::updateGroupMsg(const PDU &pdu)
 {
-    if (m_pShowMsgTE != NULL) {
-        m_pShowMsgTE->append(strMsg);
+    // 从 pdu 中解析出发送者和消息内容
+    QString senderName = QString::fromUtf8(pdu.caData);
+    QString msgContent = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+
+    QString strShowMsg = QString("%1：%2").arg(senderName).arg(msgContent);
+
+    if (m_pShowMsgTE != nullptr) {
+        m_pShowMsgTE->append(strShowMsg);
     }
 }

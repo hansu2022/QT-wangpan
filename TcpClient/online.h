@@ -15,7 +15,7 @@ class Online : public QWidget
 public:
     explicit Online(QWidget *parent = nullptr);
     ~Online();
-    void showUsr(PDU *pdu);
+    void showUsr(const PDU &pdu);
 private slots:
     void on_addFriend_clicked();
 

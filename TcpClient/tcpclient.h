@@ -19,6 +19,7 @@ class TcpClient : public QWidget
 public:
     TcpClient(QWidget *parent = nullptr);
     ~TcpClient();
+    void sendPdu(std::unique_ptr<PDU> pdu);
     void loadConfig();
     static TcpClient &getInstance();
     QTcpSocket& getTcpSocket();
@@ -45,6 +46,18 @@ private:
     quint16 m_usPort;
 
     QTcpSocket m_tcpSocket;
+    QByteArray m_buffer; // <-- 【新增】用于处理TCP粘包、半包的缓冲区
+
+    void handleRegistResponse(const PDU& pdu); // 处理注册响应
+    void handleLoginResponse(const PDU& pdu);// 处理登录响应
+    void handleSearchUsrResponse(const PDU& pdu); // 处理搜索用户响应
+    void handleFriendRequest(const PDU& pdu); // 处理添加好友请求
+    void handleDelFriendResponse(const PDU& pdu); // 处理删除好友响应
+    void handleDelFriendNotice(const PDU& pdu); // 处理删除好友通知
+    void handlePrivateChatRequest(const PDU& pdu);// 处理私聊请求
+    void handleGroupChatRequest(const PDU& pdu); // 处理群聊请求
+
+
     QString m_strLoginName;
     // 当前路径
     QString m_strCurPath;

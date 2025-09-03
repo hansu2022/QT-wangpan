@@ -13,8 +13,8 @@ class Friend : public QWidget
     Q_OBJECT
 public:
     explicit Friend(QWidget *parent = nullptr);
-    void showAllOnlineUsr(PDU *pdu);
-    void showAllFriend(PDU *pdu);
+    void showAllOnlineUsr(const PDU &pdu);
+    void showAllFriend(const PDU &pdu);
     QListWidget* getFriendList();
     QString m_strSearchName;
 signals:
@@ -26,7 +26,7 @@ public slots:
     void delFriend();
     void privateChat();
     void groupMsgSend();
-void updateGroupMsg(QString strMsg);
+void updateGroupMsg(const PDU &pdu);
 private:
     QTextEdit *m_pShowMsgTE;
     QListWidget *m_pFriendListWidget;

@@ -111,27 +111,27 @@ void MyTcpSocket::recvMsg()
         case MsgType::ENUM_MSG_TYPE_SEARCH_USR_REQUEST:
             handleSearchUsrRequest(*pdu);
             break;
-        // case MsgType::ENUM_MSG_TYPE_ADD_FRIEND_REQUEST:
-        //     handleAddFriendRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_ADD_FRIEND_AGREE:
-        //     handleAddFriendAgree(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_ADD_FRIEND_REFUSE:
-        //     handleAddFriendRefuse(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_FLUSH_FRIEND_REQUEST:
-        //     handleFlushFriendRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_DEL_FRIEND_REQUEST:
-        //     handleDelFriendRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST:
-        //     handlePrivateChatRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:
-        //     handleGroupChatRequest(*pdu);
-        //     break;
+        case MsgType::ENUM_MSG_TYPE_ADD_FRIEND_REQUEST:
+            handleAddFriendRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_ADD_FRIEND_AGREE:
+            handleAddFriendAgree(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_ADD_FRIEND_REFUSE:
+            handleAddFriendRefuse(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_FLUSH_FRIEND_REQUEST:
+            handleFlushFriendRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_DEL_FRIEND_REQUEST:
+            handleDelFriendRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST:
+            handlePrivateChatRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_GROUP_CHAT_REQUEST:
+            handleGroupChatRequest(*pdu);
+            break;
         // case MsgType::ENUM_MSG_TYPE_CREATE_DIR_REQUEST:
         //     handleCreateDirRequest(*pdu);
         //     break;
@@ -347,7 +347,7 @@ void MyTcpSocket::handleAddFriendAgree(const PDU& pdu){
     QString caPerName = QString::fromUtf8(parts[1]); // 同意者B
     qDebug() << "同意添加好友 -> 请求者:" << caName << "同意者:" << caPerName;
     // 调用数据库操作类处理添加好友请求
-    int res = OpeDB::getInstance().handleAddFriend(caName.toStdString().c_str(), caPerName.toStdString().c_str());
+    OpeDB::getInstance().handleAddFriendAgree(caName.toStdString().c_str(), caPerName.toStdString().c_str());
 
     // 2. 创建响应PDU，通知 A
     auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_ADD_FRIEND_RESPOND);
@@ -394,24 +394,33 @@ void MyTcpSocket::handleFlushFriendRequest(const PDU& pdu){
     // 1. 提取请求者用户名
     QString caName = QString::fromUtf8(pdu.caData);
     qDebug() << "刷新好友列表请求 -> 用户名:" << caName;
+
     // 2. 调用数据库操作类获取好友列表
+    qDebug() << "调用数据库操作，查询用户 " << caName << " 的好友列表...";
     QStringList friendList = OpeDB::getInstance().handleFlushFriend(caName.toStdString().c_str());
+    qDebug() << "数据库返回的好友列表:" << friendList;
 
     // 3.使用 QDataStream 序列化好友列表
     QByteArray buffer;
     QDataStream stream(&buffer, QIODevice::WriteOnly);
     stream << friendList;
+    qDebug() << "序列化好友列表完成，数据大小为:" << buffer.size();
 
     // 4. 创建响应PDU并填充数据
     auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_FLUSH_FRIEND_RESPOND, buffer.size());
+    qDebug() << "创建响应PDU，消息类型: ENUM_MSG_TYPE_FLUSH_FRIEND_RESPOND, 数据大小:" << respdu->vMsg.size();
 
     // 5. 将序列化后的数据拷贝到PDU的可变消息区
     if (!buffer.isEmpty()) {
         memcpy(respdu->vMsg.data(), buffer.constData(), buffer.size());
+        qDebug() << "好友列表数据成功拷贝到PDU中。";
+    } else {
+        qWarning() << "好友列表为空，没有数据需要拷贝。";
     }
 
     // 6. 发送PDU给客户端
     sendPdu(std::move(respdu));
+    qDebug() << "响应PDU已发送给客户端。";
 }
 
 /**

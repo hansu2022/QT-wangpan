@@ -41,37 +41,66 @@ void PrivateChat::clearMsg()
     ui->showMsg_te->clear(); // 调用 QTextEdit 控件的 clear() 方法，清空显示内容
 }
 
-// 更新消息显示区域，显示新接收到的消息
-void PrivateChat::updateMsg(const PDU *pdu)
+// // 更新消息显示区域，显示新接收到的消息
+// void PrivateChat::updateMsg(const PDU *pdu)
+// {
+//     if(pdu == NULL) return; // 检查 PDU 指针是否为空
+//     char caSendName[32] = {'\0'}; // 创建一个字符数组，用于存储发送者名称
+//     strncpy(caSendName,pdu->caData,32); // 从 PDU 的 caData 字段中复制发送者名称
+//     QString strMsg = QString("%1：%2").arg(QString(caSendName)).arg(QString(pdu->caMsg)); // 格式化消息字符串，格式为 "发送者：消息内容"
+//     ui->showMsg_te->append(strMsg); // 将格式化后的消息追加到 QTextEdit 控件中显示
+// }
+
+/**
+ * @brief 【重构】显示接收到的私聊消息
+ * @param pdu 包含消息内容的PDU
+ */
+void PrivateChat::showMsg(const PDU &pdu)
 {
-    if(pdu == NULL) return; // 检查 PDU 指针是否为空
-    char caSendName[32] = {'\0'}; // 创建一个字符数组，用于存储发送者名称
-    strncpy(caSendName,pdu->caData,32); // 从 PDU 的 caData 字段中复制发送者名称
-    QString strMsg = QString("%1：%2").arg(QString(caSendName)).arg(QString(pdu->caMsg)); // 格式化消息字符串，格式为 "发送者：消息内容"
-    ui->showMsg_te->append(strMsg); // 将格式化后的消息追加到 QTextEdit 控件中显示
+    // 1. 从 caData 中解析出发送者名称
+    // caData 格式: "发送者\0接收者(我)"
+    QByteArray nameData(pdu.caData, sizeof(pdu.caData));
+    QString senderName = QString::fromUtf8(nameData.split('\0').first());
+
+    // 2. 从 vMsg 中解析出消息内容
+    QString msgContent = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+
+    // 3. 将格式化后的消息追加到显示区域
+    QString strMsg = QString("%1：%2").arg(senderName).arg(msgContent);
+    ui->showMsg_te->append(strMsg);
 }
 
-// "发送消息"按钮的点击槽函数
+/**
+ * @brief 【重构】"发送消息"按钮的点击槽函数
+ */
 void PrivateChat::on_sendMsg_pb_clicked()
 {
-    QString strMsg = ui->inputMsg_le->text(); // 获取用户在输入框中输入的文本
-    ui->inputMsg_le->clear(); // 清空输入框中的文本
-    if(!strMsg.isEmpty()){ // 检查消息内容是否为空
-        // 如果不为空，则构造 PDU 数据包
-        PDU *pdu = mkPDU(strMsg.size()+1); // 创建一个大小合适的 PDU，strMsg.size()+1 是为了容纳字符串结束符
-        pdu->uiMsgType = ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST; // 设置消息类型为私聊请求
-        // 将发送者、接收者和消息内容复制到 PDU 数据区
-        strncpy(pdu->caData,m_strLoginName.toStdString().c_str(),32); // 复制发送者的登录名
-        strncpy(pdu->caData+32,m_strChatName.toStdString().c_str(),32); // 复制接收者的名称
-        strcpy(pdu->caMsg,strMsg.toStdString().c_str()); // 复制消息内容
-        TcpClient::getInstance().getTcpSocket().write((char*)pdu,pdu->uiPDULen); // 通过 TCP 套接字发送 PDU 数据
-        free(pdu); // 释放动态分配的 PDU 内存
-        pdu = NULL; // 将指针置为空，防止野指针
-        // 显示自己发送的消息
-        QString strShowMsg = QString("我：%1").arg(strMsg); // 格式化显示的消息字符串，格式为 "我：消息内容"
-        ui->showMsg_te->append(strShowMsg); // 将发送的消息显示在消息区域
-        ui->inputMsg_le->clear();
-    }else{
-        QMessageBox::critical(this,"发送消息","发送消息不能为空"); // 如果消息为空，则弹出警告框
+    QString strMsg = ui->inputMsg_le->text();
+    if (strMsg.isEmpty()) {
+        QMessageBox::warning(this, "发送消息", "发送消息不能为空");
+        return;
     }
+    ui->inputMsg_le->clear();
+
+    QByteArray msgBytes = strMsg.toUtf8();
+
+    // 1. 使用工厂函数创建PDU，消息长度为实际内容的字节数
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_PRIVATE_CHAT_REQUEST, msgBytes.size());
+
+    // 2. 按照服务器的新协议打包发送者和接收者名称 ("发送者(我)\0接收者")
+    QByteArray nameData;
+    nameData.append(m_strLoginName.toUtf8());
+    nameData.append('\0');
+    nameData.append(m_strChatName.toUtf8());
+    memcpy(pdu->caData, nameData.constData(), nameData.size());
+
+    // 3. 将消息内容拷贝到可变数据区 vMsg
+    memcpy(pdu->vMsg.data(), msgBytes.constData(), msgBytes.size());
+
+    // 4. 使用 TcpClient 的新接口发送PDU
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+
+    // 5. 在本地显示自己发送的消息
+    QString strShowMsg = QString("我：%1").arg(strMsg);
+    ui->showMsg_te->append(strShowMsg);
 }
