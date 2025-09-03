@@ -216,14 +216,20 @@ void MyTcpSocket::handleRegistRequest(const PDU &pdu)
  */
 void MyTcpSocket::handleLoginRequest(const PDU &pdu)
 {
-    char caName[32] = {'\0'};
-    char caPwd[32] = {'\0'};
 
-    strncpy(caName, pdu.caData, 32);
-    strncpy(caPwd, pdu.caData + 32, 32);
+    QByteArray data(pdu.caData, sizeof(pdu.caData));
+    QList<QByteArray> parts = data.split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid login request format";
+        return;
+    }
+    QString caName = QString::fromUtf8(parts[0]);
+    QString caPwd = QString::fromUtf8(parts[1]);
+
     qDebug() << "登录请求 -> 用户名:" << caName << "密码:" << caPwd;
 
-    bool ret = OpeDB::getInstance().handleLogin(caName, caPwd);
+    bool ret = OpeDB::getInstance().handleLogin(caName.toStdString().c_str(), caPwd.toStdString().c_str());
+
 
     auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_LOGIN_RESPOND);
     if (ret) {
@@ -285,13 +291,18 @@ void MyTcpSocket::handleSearchUsrRequest(const PDU &pdu)
  */
 void MyTcpSocket::handleAddFriendRequest(const PDU& pdu)
 {
-    char caPerName[32] = {'\0'}; // 被请求者 (B) 的名字
-    char caName[32] = {'\0'};    // 请求者 (A) 的名字
-    strncpy(caPerName, pdu.caData, 31);
-    strncpy(caName, pdu.caData + 32, 31);
-    qDebug() << "handleAddFriendRequest: target=" << caPerName << ", requester=" << caName;
-
-    int res = OpeDB::getInstance().handleAddFriend(caPerName, caName);
+    // 从 pdu->caData 中提取请求者A和被请求者B的名字
+    QByteArray data(pdu.caData, sizeof(pdu.caData));
+    QList<QByteArray> parts = data.split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid add friend request format";
+        return;
+    }
+    QString caPerName = QString::fromUtf8(parts[0]); // 被请求者B
+    QString caName = QString::fromUtf8(parts[1]);    // 请求者A
+    qDebug() << "添加好友请求 -> 请求者:" << caName << "被请求者:" << caPerName;
+    // 调用数据库操作类处理添加好友请求
+    int res = OpeDB::getInstance().handleAddFriend(caName.toStdString().c_str(), caPerName.toStdString().c_str());
     qDebug() << "handleAddFriend DB result:" << res;
 
     // 情况1：请求成功，且B在线，需要将请求转发给B
@@ -319,6 +330,166 @@ void MyTcpSocket::handleAddFriendRequest(const PDU& pdu)
     strncpy(respdu->caData, responseMsg, sizeof(respdu->caData) - 1);
     sendPdu(std::move(respdu));
 }
+
+/**
+ * @brief 处理同意添加好友的请求 (B -> 服务器 -> A)
+ * @param pdu 包含同意信息的PDU。caData格式: "请求者A\0同意者B"
+ */
+void MyTcpSocket::handleAddFriendAgree(const PDU& pdu){
+    // 1. 解析名字
+    QByteArray data(pdu.caData, sizeof(pdu.caData));
+    QList<QByteArray> parts = data.split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid add friend agree format";
+        return;
+    }
+    QString caName = QString::fromUtf8(parts[0]);    // 请求者A
+    QString caPerName = QString::fromUtf8(parts[1]); // 同意者B
+    qDebug() << "同意添加好友 -> 请求者:" << caName << "同意者:" << caPerName;
+    // 调用数据库操作类处理添加好友请求
+    int res = OpeDB::getInstance().handleAddFriend(caName.toStdString().c_str(), caPerName.toStdString().c_str());
+
+    // 2. 创建响应PDU，通知 A
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_ADD_FRIEND_RESPOND);
+
+    // 3. 准备要转发给 A 的消息
+    QString successMsgg = QString("%1 已同意您的好友请求").arg(caPerName);
+    strncpy(respdu->caData, successMsgg.toStdString().c_str(), sizeof(respdu->caData) - 1);
+    // 将响应发送给请求者A
+    MyTcpServer::getInstance().resend(caName, *respdu);
+}
+
+/**
+ * @brief 处理拒绝添加好友的请求 (B -> 服务器 -> A)
+ * @param pdu 包含拒绝信息的PDU。caData格式: "请求者A\0拒绝者B"
+ */
+
+void MyTcpSocket::handleAddFriendRefuse(const PDU& pdu){
+    // 1. 解析名字
+    QByteArray data(pdu.caData, sizeof(pdu.caData));
+    QList<QByteArray> parts = data.split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid add friend refuse format";
+        return;
+    }
+    QString caName = QString::fromUtf8(parts[0]);    // 请求者A
+    QString caPerName = QString::fromUtf8(parts[1]); // 拒绝者B
+    qDebug() << "拒绝添加好友 -> 请求者:" << caName << "拒绝者:" << caPerName;
+
+    // 2. 创建响应PDU，通知 A
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_ADD_FRIEND_RESPOND);
+
+    // 3. 准备要转发给 A 的消息
+    QString refuseMsg = QString("%1 拒绝了您的好友请求").arg(caPerName);
+    strncpy(respdu->caData, refuseMsg.toStdString().c_str(), sizeof(respdu->caData) - 1);
+    // 将响应发送给请求者A
+    MyTcpServer::getInstance().resend(caName, *respdu);
+}
+
+/**
+ * @brief 处理刷新好友列表的请求
+ * @param pdu 包含请求者用户名的PDU
+ */
+void MyTcpSocket::handleFlushFriendRequest(const PDU& pdu){
+    // 1. 提取请求者用户名
+    QString caName = QString::fromUtf8(pdu.caData);
+    qDebug() << "刷新好友列表请求 -> 用户名:" << caName;
+    // 2. 调用数据库操作类获取好友列表
+    QStringList friendList = OpeDB::getInstance().handleFlushFriend(caName.toStdString().c_str());
+
+    // 3.使用 QDataStream 序列化好友列表
+    QByteArray buffer;
+    QDataStream stream(&buffer, QIODevice::WriteOnly);
+    stream << friendList;
+
+    // 4. 创建响应PDU并填充数据
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_FLUSH_FRIEND_RESPOND, buffer.size());
+
+    // 5. 将序列化后的数据拷贝到PDU的可变消息区
+    if (!buffer.isEmpty()) {
+        memcpy(respdu->vMsg.data(), buffer.constData(), buffer.size());
+    }
+
+    // 6. 发送PDU给客户端
+    sendPdu(std::move(respdu));
+}
+
+/**
+ * @brief 处理删除好友的请求
+ * @param pdu 包含请求者和被删除者信息的PDU。caData格式: "请求者\0被删除的好友"
+ */
+void MyTcpSocket::handleDelFriendRequest(const PDU& pdu){
+    // 1. 解析名字
+    QByteArray data(pdu.caData, sizeof(pdu.caData));
+    QList<QByteArray> parts = data.split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid delete friend request format";
+        return;
+    }
+
+    QString caName = QString::fromUtf8(parts[0]);    // 请求者
+    QString caPerName = QString::fromUtf8(parts[1]); // 被删除的好友
+    qDebug() << "删除好友请求 -> 请求者:" << caName << "被删除的好友:" << caPerName;
+
+    // 2. 调用数据库操作类处理删除好友请求
+    int ret = OpeDB::getInstance().handleDelFriend(caName.toStdString().c_str(), caPerName.toStdString().c_str());
+
+    // 3. 创建响应PDU
+    auto respdu = make_pdu(MsgType::ENUM_MSG_TYPE_DEL_FRIEND_RESPOND);
+    if(ret){
+        strncpy(respdu->caData, "删除好友成功", sizeof(respdu->caData) - 1);
+
+        //4. 通知被删除的好友
+        auto noticePdu = make_pdu(MsgType::ENUM_MSG_TYPE_DEL_FRIEND_NOTICE);
+        strncpy(noticePdu->caData, caName.toStdString().c_str(), sizeof(noticePdu->caData) - 1);
+        MyTcpServer::getInstance().resend(caPerName, *noticePdu);
+    }else{
+        strncpy(respdu->caData, "删除好友失败", sizeof(respdu->caData) - 1);
+    }
+    // 5. 发送响应PDU给请求者
+    sendPdu(std::move(respdu));
+}
+
+/**
+ * @brief 处理私聊请求并转发
+ * @param pdu 包含私聊信息的PDU。caData格式: "发送者\0接收者", vMsg: 聊天内容
+ */
+void MyTcpSocket::handlePrivateChatRequest(const PDU& pdu){
+    // 1. 解析名字
+    QByteArray data(pdu.caData, sizeof(pdu.caData));
+    QList<QByteArray> parts = data.split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid private chat request format";
+        return;
+    }
+
+    QString caName = QString::fromUtf8(parts[0]);    // 发送者
+    QString caPerName = QString::fromUtf8(parts[1]); // 接收者
+    qDebug() << "私聊请求 -> 发送者:" << caName << "接收者:" << caPerName;
+
+    // 2. 直接转发给接收者
+    MyTcpServer::getInstance().resend(caPerName, pdu);
+}
+
+/**
+ * @brief 处理群聊请求并转发给所有在线好友
+ * @param pdu 包含群聊信息的PDU。caData格式: "发送者", vMsg: 聊天内容
+ */
+void MyTcpSocket::handleGroupChatRequest(const PDU& pdu){
+    // 1. 解析发送者名字
+    QString senderName = QString::fromUtf8(pdu.caData);
+    qDebug() << "群聊请求 -> 发送者:" << senderName;
+    // 2. 获取发送者的好友列表
+    QStringList friendListWithStatus = OpeDB::getInstance().handleFlushFriend(senderName.toStdString().c_str());
+    // 3. 遍历好友列表，逐个转发消息
+    for(const QString& friendInfo : friendListWithStatus){
+        if(friendInfo.endsWith("(在线)")){
+            QString friendName = friendInfo.left(friendInfo.lastIndexOf('('));
+            MyTcpServer::getInstance().resend(friendName, pdu);
+        }
+    }
+}
+
 
 void MyTcpSocket::sendPdu(std::unique_ptr<PDU> pdu)
 {
