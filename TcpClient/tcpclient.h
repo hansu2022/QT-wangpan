@@ -28,6 +28,12 @@ public:
     void setEnterDirName(const QString& name);
     void setCurPath(QString setCurPath);
     QString getRootPath();
+
+    // 【新增】获取服务器IP地址
+    QString getServerIP() const;
+
+    // 【新增】获取服务器端口号
+    quint16 getServerPort() const;
 public slots:
     void showConnect();
     void recvMsg();

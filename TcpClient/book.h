@@ -8,7 +8,7 @@
 #include <QHBoxLayout>
 #include "protocol.h"
 #include <QTimer>
-
+#include <QProgressBar>
 class Book : public QWidget
 {
     Q_OBJECT
@@ -35,10 +35,39 @@ public:
     void handleFriendListUpdated();
     void selectDestDir();
 signals:
-
+    // --- 多线程上传相关信号 ---
+    /**
+     * @brief 触发工作线程开始读取文件的信号
+     * @param filePath 本地文件路径
+     */
+    void startUploadTask(const QString &filePath, const QString &serverIP, quint16 serverPort, const QByteArray &pduData);
 public slots:
     void createDirSlot();
     void flushFileSlot();
+    // --- 多线程上传相关槽函数 ---
+    /**
+     * @brief 接收工作线程发来的文件数据块并发送
+     * @param data 文件数据块
+     */
+    void sendDataChunk(const QByteArray& data);
+
+    /**
+     * @brief 更新上传进度条
+     * @param sentSize 已发送大小
+     * @param totalSize 总大小
+     */
+    void updateUploadProgress(qint64 sentSize, qint64 totalSize);
+
+    /**
+     * @brief 处理上传过程中发生的错误
+     * @param err 错误信息
+     */
+    void onUploadError(const QString &err);
+
+    /**
+     * @brief 上传完成后进行清理
+     */
+    void onUploadFinished();
     // void handleFriendListUpdated(); // 处理好友列表更新的槽函数
 private:
 
@@ -66,7 +95,8 @@ private:
     QString m_strMoveFileName; // 用于存储要移动的文件名
     QString m_strMoveFilePath; // 用于存储要移动的文件的当前路径
     QString m_strDestDirPath; // 用于存储目标目录路径
-
+    // --- UI 相关 ---
+    QProgressBar *m_pProgressBar; // 添加一个进度条成员变量
 };
 
 #endif // BOOK_H

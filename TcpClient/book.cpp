@@ -9,6 +9,8 @@
 #include "openwidget.h"
 #include "sharefile.h"
 #include <QListWidget>
+#include <QThread>
+#include "fileuploadworker.h"
 // Book 类的构造函数
 Book::Book(QWidget *parent)
     : QWidget{parent}
@@ -30,6 +32,11 @@ Book::Book(QWidget *parent)
     m_pSelectDirPB = new QPushButton("目标目录", this);
     m_pSelectDirPB->setEnabled(false); // 初始状态下禁用目标目录按钮
 
+    // --- 新增进度条 ---
+    m_pProgressBar = new QProgressBar(this);
+    m_pProgressBar->setRange(0, 100);
+    m_pProgressBar->setValue(0);
+    m_pProgressBar->setVisible(false); // 初始时隐藏
 
     // 创建一个垂直布局管理器，用于放置文件夹操作按钮
     QVBoxLayout *pDirVBL = new QVBoxLayout;
@@ -52,11 +59,16 @@ Book::Book(QWidget *parent)
     pFileVBL->addWidget(m_pShareFilePB);
 
     // 创建一个主水平布局管理器，用于将列表和两个按钮布局管理器整合在一起
-    QHBoxLayout *pMainHBL = new QHBoxLayout(this);
+    QHBoxLayout *pMainHBL = new QHBoxLayout;
     pMainHBL->addWidget(m_pBookListw); // 将文件列表添加到主布局
     pMainHBL->addLayout(pDirVBL);      // 将文件夹操作布局添加到主布局
     pMainHBL->addLayout(pFileVBL);     // 将文件操作布局添加到主布局
-    setLayout(pMainHBL); // 设置窗口的布局
+
+    // 将主布局和进度条放入一个新的垂直布局
+    QVBoxLayout* pFinalLayout = new QVBoxLayout;
+    pFinalLayout->addLayout(pMainHBL);
+    pFinalLayout->addWidget(m_pProgressBar); // 将进度条添加到布局底部
+    setLayout(pFinalLayout);
 
     // 将新建文件夹按钮的 clicked 信号连接到 createDirSlot 槽函数
     connect(m_pCreateDirPB, &QPushButton::clicked, this, &Book::createDirSlot);
@@ -320,32 +332,80 @@ void Book::returnDir()
 // 上传文件的槽函数
 void Book::uploadFile()
 {
-    m_strUploadFilePath = QFileDialog::getOpenFileName(this, "选择要上传的文件");
-    if (m_strUploadFilePath.isEmpty()) {
-        QMessageBox::warning(this, "上传文件", "请选择要上传的文件");
-        return;
-    }
+    QString uploadFilePath = QFileDialog::getOpenFileName(this, "选择要上传的文件");
+    if (uploadFilePath.isEmpty()) return;
 
-    QFileInfo fileInfo(m_strUploadFilePath);
+    // --- 1. 准备 PDU 并序列化 ---
+    QFileInfo fileInfo(uploadFilePath);
     QString strFileName = fileInfo.fileName();
     qint64 fileSize = fileInfo.size();
-
-    // 1. 获取当前路径
     QString strCurPath = TcpClient::getInstance().curPath();
     QByteArray pathData = strCurPath.toUtf8();
-
-    // 2. 创建 PDU
     auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_REQUEST, pathData.size());
-
-    // 3. 填充数据
-    // 使用 QString::asprintf 或 snprintf 更安全地格式化字符串
     QString fileHeader = QString("%1#%2").arg(strFileName).arg(fileSize);
     strncpy(pdu->caData, fileHeader.toStdString().c_str(), sizeof(pdu->caData) - 1);
     memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
 
-    // 4. 发送
-    TcpClient::getInstance().sendPdu(std::move(pdu));
+    std::vector<char> serialized_pdu_vec = pdu->serialize();
+    QByteArray serialized_pdu = QByteArray(serialized_pdu_vec.data(), serialized_pdu_vec.size());
+
+    // --- 2. 设置多线程 ---
+    QThread* thread = new QThread;
+    FileUploadWorker* worker = new FileUploadWorker;
+    worker->moveToThread(thread);
+
+    // a. 触发工作
+    //    注意信号签名要改
+    connect(this, &Book::startUploadTask, worker, &FileUploadWorker::startUpload);
+    // b. 处理反馈
+    connect(worker, &FileUploadWorker::progress, this, &Book::updateUploadProgress);
+    connect(worker, &FileUploadWorker::error, this, &Book::onUploadError);
+    // c. 清理
+    connect(worker, &FileUploadWorker::finished, this, &Book::onUploadFinished);
+    connect(worker, &FileUploadWorker::finished, thread, &QThread::quit);
+    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+
+    thread->start();
+
+    // 5. 发出信号，触发任务开始
+    QString serverIP = TcpClient::getInstance().getServerIP(); // 假设TcpClient提供这些接口
+    quint16 serverPort = TcpClient::getInstance().getServerPort();
+    emit startUploadTask(uploadFilePath, serverIP, serverPort, serialized_pdu);
+
+    // UI提示
+    m_pProgressBar->setValue(0);
+    m_pProgressBar->setVisible(true);
 }
+
+void Book::sendDataChunk(const QByteArray &data)
+{
+    // 这个槽在主线程中执行，安全地写入主线程的socket
+    TcpClient::getInstance().getTcpSocket().write(data);
+}
+
+void Book::updateUploadProgress(qint64 sentSize, qint64 totalSize)
+{
+    if (totalSize > 0) {
+        int percentage = (sentSize * 100) / totalSize;
+        m_pProgressBar->setValue(percentage);
+    }
+}
+
+void Book::onUploadError(const QString &err)
+{
+    QMessageBox::critical(this, "上传失败", err);
+    m_pProgressBar->setVisible(false); // 隐藏进度条
+}
+
+void Book::onUploadFinished()
+{
+    qDebug() << "主线程：收到工作线程 finished 信号";
+    m_pProgressBar->setVisible(false);
+    // 注意：这里的完成只是文件“读取”完成，
+    // 最终的“上传成功”消息需要等待服务器的PDU响应
+}
+
 
 void Book::startFileUpload()
 {

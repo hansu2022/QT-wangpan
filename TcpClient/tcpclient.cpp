@@ -104,6 +104,17 @@ QString TcpClient::getRootPath()
     return m_strRootPath;
 }
 
+QString TcpClient::getServerIP() const
+{
+    return m_strIP;
+}
+
+
+quint16 TcpClient::getServerPort() const
+{
+    return m_usPort;
+}
+
 // 槽函数：连接成功时显示消息框
 void TcpClient::showConnect()
 {

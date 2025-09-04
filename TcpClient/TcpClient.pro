@@ -10,6 +10,7 @@ CONFIG += c++17
 
 SOURCES += \
     book.cpp \
+    fileuploadworker.cpp \
     friend.cpp \
     main.cpp \
     online.cpp \
@@ -21,6 +22,7 @@ SOURCES += \
 
 HEADERS += \
     book.h \
+    fileuploadworker.h \
     friend.h \
     online.h \
     opewidget.h \
