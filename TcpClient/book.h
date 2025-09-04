@@ -41,6 +41,7 @@ signals:
      * @param filePath 本地文件路径
      */
     void startUploadTask(const QString &filePath, const QString &serverIP, quint16 serverPort, const QByteArray &pduData);
+    void startDownloadTask(const QString &savePath, const QString &serverIP, quint16 serverPort, const QByteArray &pduData);
 public slots:
     void createDirSlot();
     void flushFileSlot();
@@ -68,6 +69,10 @@ public slots:
      * @brief 上传完成后进行清理
      */
     void onUploadFinished();
+    // --- 多线程下载相关槽函数 ---
+    void updateDownloadProgress(qint64 receivedSize, qint64 totalSize);
+    void onDownloadError(const QString &err);
+    void onDownloadFinished(const QString& message);
     // void handleFriendListUpdated(); // 处理好友列表更新的槽函数
 private:
 
@@ -97,6 +102,7 @@ private:
     QString m_strDestDirPath; // 用于存储目标目录路径
     // --- UI 相关 ---
     QProgressBar *m_pProgressBar; // 添加一个进度条成员变量
+    bool m_isDownloading; // 标志当前是否在下载
 };
 
 #endif // BOOK_H

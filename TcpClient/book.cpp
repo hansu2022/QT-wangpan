@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QThread>
 #include "fileuploadworker.h"
+#include "filedownloadworker.h"
 // Book 类的构造函数
 Book::Book(QWidget *parent)
     : QWidget{parent}
@@ -19,6 +20,7 @@ Book::Book(QWidget *parent)
     m_bDownload = false;
     m_iRecved = 0;
     m_iTotal = 0;
+    m_isDownloading = false; // 初始化
     m_bInSharingProcess = false; // 初始化为不处于分享文件过程
     // 创建一个 QListWidget 控件，用于显示文件和文件夹列表
     m_pBookListw = new QListWidget(this);
@@ -404,6 +406,8 @@ void Book::onUploadFinished()
     m_pProgressBar->setVisible(false);
     // 注意：这里的完成只是文件“读取”完成，
     // 最终的“上传成功”消息需要等待服务器的PDU响应
+    // 主动请求刷新文件列表
+    flushFileSlot();
 }
 
 
@@ -452,52 +456,87 @@ void Book::uploadFileData(){
 
 void Book::downloadFile()
 {
-    qDebug() << "进入 downloadFile() 槽函数...";
-
+    if (m_isDownloading) {
+        QMessageBox::information(this, "下载", "当前已有文件正在下载，请稍后再试。");
+        return;
+    }
     QListWidgetItem *pItem = m_pBookListw->currentItem();
     if (!pItem || pItem->data(Qt::UserRole).toInt() != 1) { // 1 代表文件
-        qDebug() << "错误：没有选择文件或所选项目不是文件。";
-        if (pItem) {
-            qDebug() << "选中的项目文本:" << pItem->text() << ", UserRole:" << pItem->data(Qt::UserRole).toInt();
-        } else {
-            qDebug() << "pItem 是 nullptr。";
-        }
         QMessageBox::warning(this, "下载", "请选择一个文件进行下载");
         return;
     }
 
+    // 1. 获取本地保存路径
     QString fileName = pItem->text();
-    qDebug() << "准备下载文件:" << fileName;
-
     QString defaultPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    QString fullDefaultPath = QDir(defaultPath).filePath(fileName);
-    m_strSaveFilePath = QFileDialog::getSaveFileName(this, "保存文件", fullDefaultPath);
-
-    if (m_strSaveFilePath.isEmpty()) {
-        qDebug() << "用户取消了保存操作，未选择保存路径。";
+    QString saveFilePath = QFileDialog::getSaveFileName(this, "保存文件", QDir(defaultPath).filePath(fileName));
+    if (saveFilePath.isEmpty()) {
         return; // 用户取消
     }
-    qDebug() << "文件将保存到:" << m_strSaveFilePath;
 
-
-    // 1. 获取当前服务器路径
+    // 2. 准备下载请求 PDU
     QString strCurPath = TcpClient::getInstance().curPath();
     QByteArray pathData = strCurPath.toUtf8();
-    qDebug() << "获取到当前服务器路径:" << strCurPath;
-
-    // 2. 创建 PDU
     auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST, pathData.size());
-    qDebug() << "创建PDU，消息类型: ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST, 消息体大小:" << pathData.size();
-
-    // 3. 填充数据 (要下载的文件名放入 caData，它所在的服务器路径放入 vMsg)
     strncpy(pdu->caData, fileName.toStdString().c_str(), sizeof(pdu->caData) - 1);
     memcpy(pdu->vMsg.data(), pathData.constData(), pathData.size());
-    qDebug() << "PDU填充数据完成。文件名:" << pdu->caData << ", 服务器路径:" << reinterpret_cast<char*>(pdu->vMsg.data());
 
+    // 序列化PDU以便跨线程传递
+    std::vector<char> serialized_pdu_vec = pdu->serialize();
+    QByteArray serialized_pdu = QByteArray(serialized_pdu_vec.data(), serialized_pdu_vec.size());
 
-    // 4. 发送
-    TcpClient::getInstance().sendPdu(std::move(pdu));
-    qDebug() << "已发送下载请求 PDU 到服务器。";
+    // 3. 设置多线程
+    QThread* thread = new QThread;
+    FileDownloadWorker* worker = new FileDownloadWorker;
+    worker->moveToThread(thread);
+
+    // a. 触发工作
+    connect(this, &Book::startDownloadTask, worker, &FileDownloadWorker::startDownload);
+    // b. 处理反馈
+    connect(worker, &FileDownloadWorker::progress, this, &Book::updateDownloadProgress);
+    connect(worker, &FileDownloadWorker::error, this, &Book::onDownloadError);
+    connect(worker, &FileDownloadWorker::finished, this, &Book::onDownloadFinished);
+    // c. 清理
+    connect(worker, &FileDownloadWorker::finished, thread, &QThread::quit);
+    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+
+    thread->start();
+
+    // 4. 发出信号，触发任务开始
+    QString serverIP = TcpClient::getInstance().getServerIP();
+    quint16 serverPort = TcpClient::getInstance().getServerPort();
+    emit startDownloadTask(saveFilePath, serverIP, serverPort, serialized_pdu);
+    m_isDownloading = true; // 【新增】上锁
+    // 5. UI提示
+    m_pProgressBar->setValue(0);
+    m_pProgressBar->setVisible(true);
+}
+
+// --- 新增的槽函数实现 ---
+
+void Book::updateDownloadProgress(qint64 receivedSize, qint64 totalSize)
+{
+    if (totalSize > 0) {
+        int percentage = (receivedSize * 100) / totalSize;
+        m_pProgressBar->setValue(percentage);
+    }
+}
+
+void Book::onDownloadError(const QString &err)
+{
+    QMessageBox::critical(this, "下载失败", err);
+    m_pProgressBar->setVisible(false);
+     m_isDownloading = false; // 【新增】解锁
+}
+
+void Book::onDownloadFinished(const QString& message)
+{
+    m_pProgressBar->setVisible(false);
+    QMessageBox::information(this, "下载文件", message);
+    // 下载成功后可以刷新本地目录，如果需要的话
+
+    m_isDownloading = false; // 【新增】解锁
 }
 
 void Book::setDownloadStatus(bool status)
