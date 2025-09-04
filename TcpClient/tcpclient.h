@@ -27,6 +27,7 @@ public:
     QString curPath();
     void setEnterDirName(const QString& name);
     void setCurPath(QString setCurPath);
+    QString getRootPath(); // 新增的公有方法
 public slots:
     void showConnect();
     void recvMsg();
@@ -62,6 +63,7 @@ private:
     QString m_strLoginName;
     // 当前路径
     QString m_strCurPath;
+    QString m_strRootPath; // <-- 新增成员变量，用于存储根目录
     QString m_strEnterDirName; // 进入的文件夹名称
 
     QFile m_file;

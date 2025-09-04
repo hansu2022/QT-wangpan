@@ -99,6 +99,11 @@ void TcpClient::setCurPath(QString setCurPath)
     m_strCurPath = setCurPath;
 }
 
+QString TcpClient::getRootPath()
+{
+    return m_strRootPath;
+}
+
 // 槽函数：连接成功时显示消息框
 void TcpClient::showConnect()
 {
@@ -216,6 +221,13 @@ void TcpClient::recvMsg()
             OpeWidget::getInstance().getBook()->flushFileSlot();
             break;
         case MsgType::ENUM_MSG_TYPE_FLUSH_FILE_RESPOND:
+            if (!m_strEnterDirName.isEmpty()) {
+                // 拼接成新的当前路径
+                m_strCurPath = m_strCurPath + "/" + m_strEnterDirName;
+                // 重要：更新完路径后，立即清空 m_strEnterDirName
+                // 防止下次普通刷新时也错误地拼接路径
+                m_strEnterDirName.clear();
+            }
             OpeWidget::getInstance().getBook()->flushFile(*pdu);
             break;
         case MsgType::ENUM_MSG_TYPE_DEL_ITEM_RESPOND:
@@ -269,7 +281,8 @@ void TcpClient::handleLoginResponse(const PDU& pdu)
             QMessageBox::critical(this, "登录失败", "服务器未返回正确的用户路径。");
             return;
         }
-        setCurPath(rootPath);
+        setCurPath(rootPath);     // 设置当前路径
+        m_strRootPath = rootPath; // 保存这个路径为权威的根目录
         OpeWidget::getInstance().setUsrName(m_strLoginName);
         OpeWidget::getInstance().show();
 

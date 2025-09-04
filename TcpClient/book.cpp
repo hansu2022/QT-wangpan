@@ -292,23 +292,30 @@ void Book::returnDir()
 {
     // 获取当前客户端的路径
     QString strCurPath = TcpClient::getInstance().curPath();
-    // 获取根目录
-    QString strRootPath = QString("./%1").arg(TcpClient::getInstance().getLoginName());
-    //
+    // 获取真实的、由服务器授予的根目录
+    QString strRootPath = TcpClient::getInstance().getRootPath();
+
+    // 为了防止路径末尾有'/'导致判断失败，先进行规范化
+    if (strCurPath.endsWith('/')) {
+        strCurPath.chop(1);
+    }
+
+    // 现在这个判断是可靠的了
     if(strCurPath == strRootPath){
         QMessageBox::warning(this,"返回","已经是根目录，无法返回");
         return;
     }
+
     // 找到最后一个 '/' 的位置
     int index = strCurPath.lastIndexOf('/');
     // 截取字符串，得到上一级目录路径
-    strCurPath = strCurPath.left(index);
+    QString parentPath = strCurPath.left(index);
+
     // 更新客户端的当前路径
-    TcpClient::getInstance().setEnterDirName(""); // 清空进入目录名称，表示返回上一级
-    TcpClient::getInstance().setCurPath(strCurPath);
+    TcpClient::getInstance().setEnterDirName(""); // 清空进入目录名称
+    TcpClient::getInstance().setCurPath(parentPath);
     // 主动请求刷新文件列表
     flushFileSlot();
-
 }
 // 上传文件的槽函数
 void Book::uploadFile()
