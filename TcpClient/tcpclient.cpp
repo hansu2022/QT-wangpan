@@ -248,12 +248,24 @@ void TcpClient::recvMsg()
             // 上传文件成功后，刷新文件列表
             OpeWidget::getInstance().getBook()->flushFileSlot();
             break;
-        case MsgType::ENUM_MSG_TYPE_UPLOAD_FILE_READY_RESPOND:
-            // 服务器准备好接收文件，开始发送文件数据
-            OpeWidget::getInstance().getBook()->uploadFileData();
+        case MsgType::ENUM_MSG_TYPE_SHARE_FILE_NOTICE:
+            handleShareFileNotice(*pdu); // 调用新的独立函数处理
             break;
-        case MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_RESPOND:
-            handleDownloadFileResponse(*pdu);
+
+        case MsgType::ENUM_MSG_TYPE_SHARE_FILE_RESPOND:
+            QMessageBox::information(this, "文件分享", pdu->caData);
+            break;
+
+        case MsgType::ENUM_MSG_TYPE_RECEIVE_FILE_RESULT:
+            QMessageBox::information(this, "文件接收", pdu->caData);
+            // 接收成功或失败后，都刷新一下当前目录，以便看到新文件
+            OpeWidget::getInstance().getBook()->flushFileSlot();
+            break;
+
+        case MsgType::ENUM_MSG_TYPE_MOVE_FILE_RESPOND:
+            QMessageBox::information(this, "移动文件", pdu->caData);
+            // 移动成功或失败后，刷新文件列表以反映变化
+            OpeWidget::getInstance().getBook()->flushFileSlot();
             break;
         default:
             qWarning() << "Unhandled message type:" << static_cast<uint>(pdu->uiMsgType);
@@ -383,6 +395,41 @@ void TcpClient::handleDownloadFileResponse(const PDU &pdu)
         QMessageBox::warning(this, "下载文件", "本地文件创建失败，请检查路径或权限。");
         pBook->setDownloadStatus(false); // 打开失败，重置状态
     }
+}
+
+/**
+ * @brief 处理来自其他用户的文件分享通知
+ * @param pdu pdu.caData: 分享者名字. pdu.vMsg: 分享的文件路径
+ */
+void TcpClient::handleShareFileNotice(const PDU &pdu)
+{
+    // 1. 从 PDU 中安全地解析出分享者名字和文件路径
+    // 分享者名字在 caData
+    QString sharerName = QString::fromUtf8(pdu.caData);
+    // 文件路径在 vMsg
+    QString filePath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+
+    // 2. 弹出对话框，询问用户是否接受
+    QString strMessage = QString("%1 分享了文件给你：%2\n是否接受？")
+                             .arg(sharerName)
+                             .arg(filePath);
+    QMessageBox::StandardButton choice = QMessageBox::question(this, "文件分享通知", strMessage);
+
+    // 3. 如果用户同意，则向服务器发送回应
+    if (choice == QMessageBox::Yes) {
+        // a. 使用工厂函数创建回应PDU，vMsg大小为文件路径的长度
+        auto resPdu = make_pdu(MsgType::ENUM_MSG_TYPE_SHARE_FILE_NOTICE_RESPOND, pdu.vMsg.size());
+
+        // b. 在 caData 中放入自己的名字，告诉服务器文件要复制给谁
+        strncpy(resPdu->caData, getLoginName().toStdString().c_str(), sizeof(resPdu->caData) - 1);
+
+        // c. 在 vMsg 中回传要接收的文件路径 (从收到的pdu中直接拷贝)
+        memcpy(resPdu->vMsg.data(), pdu.vMsg.data(), pdu.vMsg.size());
+
+        // d. 使用统一的接口发送PDU
+        sendPdu(std::move(resPdu));
+    }
+    // 如果用户选择 "No"，则不执行任何操作
 }
 
 

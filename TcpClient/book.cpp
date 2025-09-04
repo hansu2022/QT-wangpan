@@ -78,12 +78,12 @@ Book::Book(QWidget *parent)
     //将下载按钮的 clicked 信号连接到 downloadFile 槽函数
     connect(m_pDownLoadPB, &QPushButton::clicked, this, &Book::downloadFile);
 
-    // // 将分享文件按钮的 clicked 信号连接到 shareFile 槽函数
-    // connect(m_pShareFilePB, &QPushButton::clicked, this, &Book::shareFile);
-    // // 将移动文件按钮的 clicked 信号连接到 moveFile 槽函数
-    // connect(m_pMoveFilePB, &QPushButton::clicked, this, &Book::moveFile);
-    // // 将目标目录按钮的 clicked 信号连接到 selectDir 槽函数
-    // connect(m_pSelectDirPB, &QPushButton::clicked, this, &Book::selectDir);
+    // 将分享文件按钮的 clicked 信号连接到 shareFile 槽函数
+    connect(m_pShareFilePB, &QPushButton::clicked, this, &Book::shareFile);
+    // 将移动文件按钮的 clicked 信号连接到 moveFile 槽函数
+    connect(m_pMoveFilePB, &QPushButton::clicked, this, &Book::moveFile);
+    // 将目标目录按钮的 clicked 信号连接到 selectDir 槽函数
+    connect(m_pSelectDirPB, &QPushButton::clicked, this, &Book::selectDir);
 }
 
 void Book::flushFileSlot(){
@@ -449,6 +449,139 @@ void Book::setDownloadStatus(bool status)
 bool Book::getDownloadStatus()
 {
     return m_bDownload;
+}
+/**
+ * @brief 点击“分享”按钮的槽函数 (入口)
+ *
+ * 这是一个异步流程的起点。由于分享操作需要最新的好友列表，
+ * 此函数不直接打开分享窗口，而是先触发一次好友列表的刷新。
+ * 它通过设置一个状态标志 m_bInSharingProcess 来“预约”一个操作，
+ * 当好友列表刷新完成后，会由 handleFriendListUpdated 接手处理。
+ */
+void Book::shareFile()
+{
+    // 1. 检查是否已选中一个文件或文件夹
+    QListWidgetItem *pCurItem = m_pBookListw->currentItem();
+    if (pCurItem == NULL) {
+        QMessageBox::warning(this, "分享", "请选择要分享的文件或文件夹");
+        return;
+    }
+
+    // 2. 设置状态标志，表明我们正处于分享流程中
+    m_bInSharingProcess = true;
+
+    // 3. 发送刷新好友列表的请求，这是一个异步操作
+    OpeWidget::getInstance().getFriend()->flushFriend();
+}
+
+/**
+ * @brief 处理好友列表更新完成的槽函数 (分享流程的第二步)
+ *
+ * 此函数由 Friend 模块在好友列表刷新成功后通过信号触发。
+ * 它检查 m_bInSharingProcess 标志，如果为true，则继续执行分享流程：
+ * 弹出好友选择窗口。
+ */
+void Book::handleFriendListUpdated()
+{
+    // 如果当前不是分享流程，则直接返回
+    if (!m_bInSharingProcess){
+        return;
+    }
+    // 重置标志，防止后续的刷新操作错误地触发此逻辑
+    m_bInSharingProcess = false;
+
+    QListWidgetItem *pCurItem = m_pBookListw->currentItem();
+    // 再次检查，防止在刷新过程中用户取消了选择
+    if (pCurItem == NULL) {
+        return;
+    }
+    m_strShareFileName = pCurItem->text();
+
+    Friend *pFriend = OpeWidget::getInstance().getFriend();
+    QListWidget *pFriendList = pFriend->getFriendList();
+
+    if (pFriendList->count() == 0){
+        QMessageBox::information(this, "分享文件", "好友列表为空，无法分享");
+        return;
+    }
+
+    // 使用最新的好友列表更新分享窗口的UI
+    ShareFile::getInstance().updateFriend(pFriendList);
+
+    // 显示分享窗口
+    if(ShareFile::getInstance().isHidden()){
+        ShareFile::getInstance().show();
+    }
+}
+
+// --- 文件移动流程 (重构) ---
+
+/**
+ * @brief 点击“移动文件”按钮的槽函数
+ *
+ * 这是移动文件操作的第一步。记录下要移动的文件或文件夹，
+ * 并启用“目标目录”按钮，等待用户选择目标位置。
+ */
+void Book::moveFile()
+{
+    QListWidgetItem* pItem = m_pBookListw->currentItem();
+    if (!pItem) {
+        QMessageBox::warning(this, "移动文件", "请选择要移动的文件或文件夹。");
+        return;
+    }
+
+    // 记录源文件的完整路径
+    m_strMoveFilePath = TcpClient::getInstance().curPath() + "/" + pItem->text();
+
+    // 启用目标目录按钮，并提示用户进行下一步操作
+    m_pSelectDirPB->setEnabled(true);
+    QMessageBox::information(this, "移动文件",
+                             QString("已选择“%1”，请在列表中选择一个目标文件夹，然后点击“目标目录”按钮。").arg(pItem->text()));
+}
+
+/**
+ * @brief 点击“目标目录”按钮的槽函数 (原 selectDir 函数重构)
+ *
+ * 这是移动文件操作的第二步。获取用户选择的目标文件夹，
+ * 构建并发送移动文件的请求。完成后，重置状态。
+ */
+void Book::selectDir()
+{
+    QListWidgetItem *pItem = m_pBookListw->currentItem();
+    if (!pItem || pItem->data(Qt::UserRole).toInt() != 0) { // 必须选择一个文件夹
+        QMessageBox::warning(this, "选择目标", "请选择一个文件夹作为目标目录！");
+        return;
+    }
+
+    QString strDestDirName = pItem->text();
+    QString strCurPath = TcpClient::getInstance().curPath();
+    m_strDestDirPath = strCurPath + '/' + strDestDirName;
+
+    // 安全检查：不能移动到自身或其子目录
+    if (m_strMoveFilePath == m_strDestDirPath || m_strDestDirPath.startsWith(m_strMoveFilePath + "/")) {
+        QMessageBox::warning(this, "移动文件", "不能将项目移动到其自身或其子目录中！");
+        return;
+    }
+
+    // 1. 使用 QByteArray 构建 vMsg，格式：[源路径]\0[目标路径]
+    QByteArray vMsgData;
+    vMsgData.append(m_strMoveFilePath.toUtf8());
+    vMsgData.append('\0');
+    vMsgData.append(m_strDestDirPath.toUtf8());
+
+    // 2. 使用工厂函数创建 PDU
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_MOVE_FILE_REQUEST, vMsgData.size());
+
+    // 3. 填充 vMsg
+    memcpy(pdu->vMsg.data(), vMsgData.constData(), vMsgData.size());
+
+    // 4. 发送 PDU
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+
+    // 5. 重置状态
+    m_pSelectDirPB->setEnabled(false);
+    m_strMoveFilePath.clear();
+    m_strDestDirPath.clear();
 }
 
 QString Book::getSaveFilePath()

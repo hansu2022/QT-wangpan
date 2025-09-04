@@ -138,25 +138,26 @@ void ShareFile::selectAll()
 
 void ShareFile::okBtnClicked()
 {
-    // 1. 收集所有被选中的、可用的好友名字
+    // 1. 收集所有被选中的、可用的好友名字 (逻辑不变)
     QStringList selectedFriends;
     QList<QAbstractButton*> allButtons = m_pButtonGroup->buttons();
 
     for(QAbstractButton* button : allButtons) {
-        if(button->isChecked() && button->isEnabled()) { // <-- 使用 isChecked() 并且检查是否可用
+        if(button->isChecked() && button->isEnabled()) {
             QString fullText = button->text();
-            int pos = fullText.indexOf('(');
-            QString friendName = (pos != -1) ? fullText.left(pos) : fullText;
+            // 移除好友状态 "(在线)"
+            QString friendName = fullText.section('(', 0, 0);
             selectedFriends.append(friendName);
         }
     }
 
-    // 2. 检查是否至少选择了一个好友
+    // 2. 检查是否至少选择了一个好友 (逻辑不变)
     if (selectedFriends.isEmpty()) {
         QMessageBox::warning(this, "分享文件", "请至少选择一个在线好友进行分享");
         return;
     }
 
+    // --- PDU 构建与发送的现代化重构 ---
 
     // 3. 准备发送的数据
     QString strMyName = TcpClient::getInstance().getLoginName();
@@ -164,30 +165,36 @@ void ShareFile::okBtnClicked()
     QString strShareFileName = OpeWidget::getInstance().getBook()->getShareFileName();
     QString strFullPath = strCurPath + "/" + strShareFileName;
 
-    // 4. 构建PDU (Protocol Data Unit)
-    // PDU消息部分大小 = 完整路径长度 + 1个'\0' + 好友数量 * 32字节
-    uint uiMsgLen = strFullPath.size() + 1 + selectedFriends.size() * 32;
-    PDU *pdu = mkPDU(uiMsgLen);
-    pdu->uiMsgType = ENUM_MSG_TYPE_SHARE_FILE_REQUEST;
+    // 4. 使用 QByteArray 安全地构建可变消息体 (vMsg)
+    // 格式: [文件完整路径]\0[好友1名字(32字节)][好友2名字(32字节)]...
+    QByteArray vMsgData;
+    vMsgData.append(strFullPath.toUtf8());
+    vMsgData.append('\0'); // 添加路径和好友列表的分隔符
 
-    // 填充自己的名字到caData
-    strncpy(pdu->caData, strMyName.toStdString().c_str(), 32);
-    pdu->caData[31] = '\0'; // 确保字符串结束
-
-    // 填充文件路径到caMsg的开头
-    strncpy(pdu->caMsg, strFullPath.toStdString().c_str(), strFullPath.size());
-
-    // 填充好友列表到caMsg的后续部分
-    char* pFriendListStart = pdu->caMsg + strFullPath.size() + 1;
-    for (int i = 0; i < selectedFriends.size(); ++i) {
-        strncpy(pFriendListStart + i * 32, selectedFriends.at(i).toStdString().c_str(), 32);
+    for (const QString& friendName : selectedFriends) {
+        // 为每个好友创建一个32字节的固定大小块
+        QByteArray friendBlock(32, '\0'); // 创建一个用'\0'填充的32字节数组
+        // 将好友名字拷贝到块的开头
+        friendBlock.prepend(friendName.toUtf8());
+        // 将这个块追加到消息体中
+        vMsgData.append(friendBlock);
     }
 
-    // 5. 发送数据
-    TcpClient::getInstance().getTcpSocket().write((char*)pdu, pdu->uiPDULen);
-    free(pdu);
-    pdu = NULL;
-    this->hide(); // 关闭分享窗口
+    // 5. 使用工厂函数创建 PDU，自动管理内存
+    auto pdu = make_pdu(MsgType::ENUM_MSG_TYPE_SHARE_FILE_REQUEST, vMsgData.size());
+
+    // 6. 填充数据
+    // a. 将分享者（自己）的名字放入 caData
+    strncpy(pdu->caData, strMyName.toStdString().c_str(), sizeof(pdu->caData) - 1);
+
+    // b. 将构建好的消息体拷贝到 pdu->vMsg
+    memcpy(pdu->vMsg.data(), vMsgData.constData(), vMsgData.size());
+
+    // 7. 使用统一的接口发送 PDU
+    TcpClient::getInstance().sendPdu(std::move(pdu));
+
+    // 8. 隐藏窗口 (逻辑不变)
+    this->hide();
 }
 
 void ShareFile::cancelBtnClicked()

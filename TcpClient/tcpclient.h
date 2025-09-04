@@ -27,7 +27,7 @@ public:
     QString curPath();
     void setEnterDirName(const QString& name);
     void setCurPath(QString setCurPath);
-    QString getRootPath(); // 新增的公有方法
+    QString getRootPath();
 public slots:
     void showConnect();
     void recvMsg();
@@ -58,6 +58,7 @@ private:
     void handlePrivateChatRequest(const PDU& pdu);// 处理私聊请求
     void handleGroupChatRequest(const PDU& pdu); // 处理群聊请求
     void handleDownloadFileResponse(const PDU& pdu); // 处理下载文件响应
+    void handleShareFileNotice(const PDU& pdu); // 处理分享文件通知
 
 
     QString m_strLoginName;

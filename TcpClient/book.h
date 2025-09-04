@@ -32,7 +32,8 @@ public:
     qint64 m_iRecved;
     QString getShareFileName();
     void startFileUpload();
-
+    void handleFriendListUpdated();
+    void selectDestDir();
 signals:
 
 public slots:

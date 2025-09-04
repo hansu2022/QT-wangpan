@@ -30,7 +30,7 @@ OpeWidget::OpeWidget(QWidget *parent)
 
     connect(m_pListW,SIGNAL(currentRowChanged(int)),m_pSW,SLOT(setCurrentIndex(int)));
 
-    // connect(m_pFriend, &Friend::friendListUpdated, m_pBook, &Book::handleFriendListUpdated);
+    connect(m_pFriend, &Friend::friendListUpdated, m_pBook, &Book::handleFriendListUpdated);
 }
 
 OpeWidget &OpeWidget::getInstance()

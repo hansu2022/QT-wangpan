@@ -153,18 +153,18 @@ void MyTcpSocket::recvMsg()
         case MsgType::ENUM_MSG_TYPE_DOWNLOAD_FILE_REQUEST:
             handleDownloadFileRequest(*pdu);
             break;
-        // case MsgType::ENUM_MSG_TYPE_SHARE_FILE_REQUEST:
-        //     handleShareFileRequest(*pdu);
-        //     break;
-        // case MsgType::ENUM_MSG_TYPE_SHARE_FILE_NOTICE_RESPOND:
-        //     handleShareFileNoticeRespond(*pdu);
-        //     break;
+        case MsgType::ENUM_MSG_TYPE_SHARE_FILE_REQUEST:
+            handleShareFileRequest(*pdu);
+            break;
+        case MsgType::ENUM_MSG_TYPE_SHARE_FILE_NOTICE_RESPOND:
+            handleShareFileNoticeRespond(*pdu);
+            break;
         // case MsgType::ENUM_MSG_TYPE_RECEIVE_FILE_RESULT:
         //     handleReceiveFileResult(*pdu);
         //     break;
-        // case MsgType::ENUM_MSG_TYPE_MOVE_FILE_REQUEST:
-        //     handleMoveFileRequest(*pdu);
-        //     break;
+        case MsgType::ENUM_MSG_TYPE_MOVE_FILE_REQUEST:
+            handleMoveFileRequest(*pdu);
+            break;
         default:
             qWarning() << "未知的消息类型:" << static_cast<uint>(pdu->uiMsgType);
             break;
@@ -779,6 +779,132 @@ void MyTcpSocket::handleDownloadFileRequest(const PDU& pdu)
 
     // 启动定时器，sendFileToClient 会被循环调用
     m_pTimer->start(1);
+}
+
+/**
+ * @brief 处理客户端分享文件/文件夹的请求 (A -> Server -> B, C, D...)
+ * @param pdu pdu.caData: 分享者A的名字. pdu.vMsg: [文件路径]\0[好友B(32字节)][好友C(32字节)]...
+ */
+void MyTcpSocket::handleShareFileRequest(const PDU& pdu)
+{
+    // 1. 解析分享者名字
+    QString sharerName = QString::fromUtf8(pdu.caData);
+
+    // 2. 使用 QByteArray 安全地解析 vMsg
+    QByteArray vMsgData(pdu.vMsg.data(), pdu.vMsg.size());
+    int separatorIndex = vMsgData.indexOf('\0');
+    if (separatorIndex == -1) {
+        qWarning() << "Invalid share file request format: no separator found.";
+        return;
+    }
+
+    // a. 提取文件路径
+    QByteArray filePathData = vMsgData.left(separatorIndex);
+    QString sharedFilePath = QString::fromUtf8(filePathData);
+
+    // b. 提取好友列表数据块
+    QByteArray friendListData = vMsgData.mid(separatorIndex + 1);
+    int friendCount = friendListData.size() / 32;
+
+    qDebug() << "分享请求 -> 分享者:" << sharerName
+             << "文件:" << sharedFilePath
+             << "分享给" << friendCount << "个好友";
+
+    // 3. 为每个好友创建并转发分享通知
+    for (int i = 0; i < friendCount; ++i) {
+        // a. 从数据块中提取好友名字
+        const char* friendNamePtr = friendListData.constData() + i * 32;
+        QString friendName = QString::fromUtf8(friendNamePtr, strnlen(friendNamePtr, 32));
+
+        // b. 创建通知PDU
+        auto noticePdu = make_pdu(MsgType::ENUM_MSG_TYPE_SHARE_FILE_NOTICE, filePathData.size());
+
+        // c. 填充通知PDU：caData放分享者名字，vMsg放文件路径
+        strncpy(noticePdu->caData, sharerName.toStdString().c_str(), sizeof(noticePdu->caData) - 1);
+        memcpy(noticePdu->vMsg.data(), filePathData.constData(), filePathData.size());
+
+        // d. 转发给在线好友
+        MyTcpServer::getInstance().resend(friendName, *noticePdu);
+    }
+
+    // 4. 回复分享者，告知请求已处理
+    auto resPdu = make_pdu(MsgType::ENUM_MSG_TYPE_SHARE_FILE_RESPOND);
+    strncpy(resPdu->caData, "文件分享请求已成功发送", sizeof(resPdu->caData) - 1);
+    sendPdu(std::move(resPdu));
+}
+
+/**
+ * @brief 处理好友同意接收分享文件的响应 (B -> Server)
+ * @param pdu pdu.caData: 接收者B的名字. pdu.vMsg: 分享者A提供的原始文件路径
+ */
+void MyTcpSocket::handleShareFileNoticeRespond(const PDU& pdu)
+{
+    // 1. 解析接收者名字和原始分享路径
+    QString receiverName = QString::fromUtf8(pdu.caData);
+    QString sharedFilePath = QString::fromUtf8(pdu.vMsg.data(), pdu.vMsg.size());
+
+    // 2. 从分享路径中提取文件名或文件夹名
+    QFileInfo sharedFileInfo(sharedFilePath);
+    if (!sharedFileInfo.exists()) {
+        qWarning() << "Share file failed: source file does not exist ->" << sharedFilePath;
+        // （可选）可以通知接收者分享失败
+        return;
+    }
+    QString baseName = sharedFileInfo.fileName();
+
+    // 3. 构建目标路径：./user_data/接收者名字/文件名
+    QString destPath = QString("./user_data/%1/%2").arg(receiverName).arg(baseName);
+
+    qDebug() << "接收分享文件 -> 接收者:" << receiverName << "源路径:" << sharedFilePath << "目标路径:" << destPath;
+
+    // 4. 根据源是文件还是目录，执行不同的复制操作
+    bool success = false;
+    if (sharedFileInfo.isDir()) {
+        // 使用我们之前有的 copyDir 函数
+        copyDir(sharedFilePath, destPath);
+        success = true; // copyDir 没有返回值，这里我们假设它总是成功
+    } else if (sharedFileInfo.isFile()) {
+        success = QFile::copy(sharedFilePath, destPath);
+    }
+
+    // 5. 回复接收者，告知操作结果
+    auto resPdu = make_pdu(MsgType::ENUM_MSG_TYPE_RECEIVE_FILE_RESULT);
+    const char* message = success ? "文件接收成功" : "文件接收失败";
+    strncpy(resPdu->caData, message, sizeof(resPdu->caData) - 1);
+
+    // 注意：这里是直接回复给当前socket的客户端，因为这个操作是由他触发的
+    sendPdu(std::move(resPdu));
+}
+
+/**
+ * @brief 处理客户端移动文件/文件夹的请求
+ * @param pdu pdu.vMsg: [源路径]\0[目标文件夹路径]
+ */
+void MyTcpSocket::handleMoveFileRequest(const PDU& pdu)
+{
+    // 1. 使用 QByteArray::split 安全地解析源路径和目标路径
+    QList<QByteArray> parts = QByteArray(pdu.vMsg.data(), pdu.vMsg.size()).split('\0');
+    if (parts.size() < 2) {
+        qWarning() << "Invalid move file request format.";
+        return;
+    }
+    QString srcPath = QString::fromUtf8(parts[0]);
+    QString destDirPath = QString::fromUtf8(parts[1]);
+
+    // 2. 从源路径提取文件名/文件夹名，并构建最终的目标路径
+    QFileInfo srcFileInfo(srcPath);
+    QString finalDestPath = QDir(destDirPath).filePath(srcFileInfo.fileName());
+
+    qDebug() << "移动文件请求 -> 从:" << srcPath << "到:" << finalDestPath;
+
+    // 3. 执行重命名操作 (在同一个文件系统中，rename即为移动)
+    bool success = QFile::rename(srcPath, finalDestPath);
+
+    // 4. 回复客户端操作结果
+    auto resPdu = make_pdu(MsgType::ENUM_MSG_TYPE_MOVE_FILE_RESPOND);
+    const char* message = success ? "移动成功" : "移动失败，请检查路径或权限";
+    strncpy(resPdu->caData, message, sizeof(resPdu->caData) - 1);
+    sendPdu(std::move(resPdu));
 }
 
 void MyTcpSocket::sendPdu(std::unique_ptr<PDU> pdu)
